@@ -51,8 +51,10 @@ desk is powered down.
 
 ## Repo status
 
-Milestone 1 complete: the `hal1976` domain package (models, detection engine, YAML behaviour
-store) with a green test suite. Next: the Home Assistant scaffold (`custom_components/hal1976/`).
+Milestones 1–2 complete: the pure domain core (models, detection engine, YAML behaviour
+store) plus the HA integration scaffold (`custom_components/hal1976/`: config flow, state
+tracking, `hal1976_behaviour_detected` event, YAML persistence, HA-harness smoke tests).
+Next: Milestone 3 — action executor, confirm/dismiss services, suggestion notifications.
 The approved MVP plan lives in `~/.opencode/plan/hal1976-mvp.md`; `PLAN.md` is the earlier draft.
 
 Naming conventions: integration domain `hal1976`, events `hal1976_behaviour_detected`,

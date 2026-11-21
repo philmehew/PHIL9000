@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up HAL1976",
+        "description": "Choose the entities HAL1976 should observe. It only watches at first — nothing is ever acted on until you confirm a learned behaviour.",
+        "data": {
+          "entities": "Entities to observe"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "HAL1976 is already set up."
+    },
+    "error": {
+      "no_entities": "Select at least one entity to observe."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HAL1976 settings",
+        "description": "Settings for pattern analysis and suggestions.",
+        "data": {
+          "agent_id": "Conversation agent for pattern analysis (blank = default agent)",
+          "notify_entity": "Notify entity for suggestions (blank = none)",
+          "cooldown_default": "Default cooldown between detections (seconds)"
+        }
+      }
+    }
+  }
+}

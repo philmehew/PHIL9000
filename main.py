@@ -2,8 +2,13 @@
 
 from datetime import datetime
 
-from hal1976 import BehaviourAction, BehaviourStatus, DetectionEngine, Observation
-from hal1976.seed import end_of_work_day
+from custom_components.hal1976 import (
+    BehaviourAction,
+    BehaviourStatus,
+    DetectionEngine,
+    Observation,
+)
+from custom_components.hal1976.seed import end_of_work_day
 
 
 def main() -> None:
