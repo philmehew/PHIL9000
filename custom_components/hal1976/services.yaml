@@ -1,0 +1,29 @@
+confirm_behaviour:
+  name: Confirm behaviour
+  description: >-
+    Confirms a candidate behaviour. From then on, HAL1976 fires
+    hal1976_behaviour_detected and runs the behaviour's actions whenever the
+    pattern is detected. Behaviour ids are listed in
+    <config>/hal1976/behaviours.yaml.
+  fields:
+    behaviour_id:
+      required: true
+      example: end_of_work_day
+      selector:
+        text:
+      name: Behaviour ID
+      description: The id of the candidate behaviour to confirm.
+
+dismiss_behaviour:
+  name: Dismiss behaviour
+  description: >-
+    Dismisses a behaviour. HAL1976 keeps recording occurrences for the record
+    but never fires the detection event or runs actions for it.
+  fields:
+    behaviour_id:
+      required: true
+      example: end_of_work_day
+      selector:
+        text:
+      name: Behaviour ID
+      description: The id of the behaviour to dismiss.

@@ -4,14 +4,16 @@ The pure domain logic (models, detection engine, YAML store) lives in this
 package with **no Home Assistant imports**: every ``homeassistant.*`` import
 here is function-local so the core modules stay importable and testable
 without Home Assistant installed. ``tests/test_purity.py`` guards this
-boundary. This module is the thin adapter over the event bus and storage.
+boundary. This module is the thin adapter over the event bus, services,
+and storage: detection and action selection are decided by the pure
+engine; the adapter only executes them against Home Assistant.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .const import (
     ATTR_ACTIONS,
@@ -26,6 +28,9 @@ from .const import (
     CONF_ENTITIES,
     DOMAIN,
     EVENT_BEHAVIOUR_DETECTED,
+    OPTION_NOTIFY_ENTITY,
+    SERVICE_CONFIRM_BEHAVIOUR,
+    SERVICE_DISMISS_BEHAVIOUR,
 )
 from .detect import Detection, DetectionEngine
 from .models import (
@@ -50,7 +55,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import Event, HomeAssistant
+    from homeassistant.core import Event, HomeAssistant, ServiceCall
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +66,9 @@ class HalRuntime:
 
     engine: DetectionEngine
     store: BehaviourStore
+    # Candidate ids already nudged to the user this session (one nudge per
+    # candidate per run; a fresh HA start allows a fresh nudge).
+    suggested: set[str] = field(default_factory=set)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
@@ -70,6 +78,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG00
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load behaviours from YAML, start the engine, watch the event bus."""
+    import voluptuous as vol  # function-local: purity guard
     from homeassistant.helpers.event import (  # function-local: purity guard
         async_track_state_change_event,
     )
@@ -77,16 +86,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = BehaviourStore(hass.config.path(CONFIG_DIR, BEHAVIOURS_FILE))
     behaviours = await hass.async_add_executor_job(store.load)
 
-    engine = DetectionEngine(behaviours, on_detect=_detection_callback(hass, entry))
+    engine = DetectionEngine(behaviours, on_detect=_detection_callback(hass))
     runtime = HalRuntime(engine=engine, store=store)
     hass.data[DOMAIN][entry.entry_id] = runtime
 
     entities: list[str] = list(entry.data[CONF_ENTITIES])
     unsub = async_track_state_change_event(
-        hass, entities, _event_handler(hass, runtime)
+        hass, entities, _event_handler(hass, entry, runtime)
     )
     entry.async_on_unload(unsub)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    behaviour_id_schema = vol.Schema({vol.Required(ATTR_BEHAVIOUR_ID): str})
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CONFIRM_BEHAVIOUR,
+        _status_service_handler(hass, entry, BehaviourStatus.CONFIRMED),
+        schema=behaviour_id_schema,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DISMISS_BEHAVIOUR,
+        _status_service_handler(hass, entry, BehaviourStatus.DISMISSED),
+        schema=behaviour_id_schema,
+    )
 
     _LOGGER.debug(
         "HAL1976 observing %d entities, %d behaviours loaded",
@@ -99,7 +122,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime: HalRuntime | None = hass.data[DOMAIN].pop(entry.entry_id, None)
     if runtime is not None:
-        await _async_save_stats(hass, runtime)
+        await _async_save(hass, runtime)
     return True
 
 
@@ -108,10 +131,13 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-def _detection_callback(hass: HomeAssistant, entry: ConfigEntry):  # noqa: ANN202
-    """Build the engine's on_detect hook: fire the hal1976 domain event."""
+# -- detection → events & actions ---------------------------------------
 
-    def on_detect(behaviour, matched) -> None:  # noqa: ANN001
+
+def _detection_callback(hass: HomeAssistant):  # noqa: ANN202
+    """Engine hook: fire the domain event, then run the behaviour's actions."""
+
+    def on_detect(behaviour: Behaviour, matched: list[Observation]) -> None:
         hass.bus.async_fire(
             EVENT_BEHAVIOUR_DETECTED,
             {
@@ -121,16 +147,49 @@ def _detection_callback(hass: HomeAssistant, entry: ConfigEntry):  # noqa: ANN20
                 ATTR_CONFIDENCE: round(behaviour.confidence, 3),
                 ATTR_OCCURRENCES: behaviour.occurrences,
                 ATTR_MATCHED: [obs.to_dict() for obs in matched],
-                # M3 turns these into actual service calls via the action
-                # executor; for now automations can consume them verbatim.
                 ATTR_ACTIONS: [action.to_dict() for action in behaviour.actions],
             },
         )
+        if behaviour.actions:
+            hass.async_create_task(_execute_actions(hass, behaviour))
 
     return on_detect
 
 
-def _event_handler(hass: HomeAssistant, runtime: HalRuntime):  # noqa: ANN202
+async def _execute_actions(hass: HomeAssistant, behaviour: Behaviour) -> None:
+    """Run a confirmed behaviour's actions as HA service calls, in order.
+
+    Each action is isolated: one failing service call is logged and does not
+    prevent the remaining actions from running.
+    """
+    for action in behaviour.actions:
+        try:
+            await hass.services.async_call(
+                action.domain,
+                action.service,
+                dict(action.data),
+                target={"entity_id": action.entity_id} if action.entity_id else None,
+                blocking=True,
+            )
+            _LOGGER.info(
+                "Executed %s.%s for behaviour %r",
+                action.domain,
+                action.service,
+                behaviour.name,
+            )
+        except Exception:  # noqa: BLE001 — keep the other actions going
+            _LOGGER.exception(
+                "Action %s.%s for behaviour %r failed",
+                action.domain,
+                action.service,
+                behaviour.name,
+            )
+
+
+# -- observation → engine → suggestions ----------------------------------
+
+
+def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: HalRuntime):  # noqa: ANN202
     """Translate state_changed events into Observations for the engine."""
     from homeassistant.core import callback  # function-local: purity guard
 
@@ -150,7 +209,7 @@ def _event_handler(hass: HomeAssistant, runtime: HalRuntime):  # noqa: ANN202
             timestamp=new_state.last_changed,
             attributes=dict(new_state.attributes),
         )
-        total_before = sum(b.occurrences for b in engine.behaviours.values())
+        before = {bid: b.occurrences for bid, b in engine.behaviours.items()}
         for detection in engine.observe(observation):
             trail = " → ".join(
                 f"{o.entity_id}={o.new_state}" for o in detection.matched
@@ -161,18 +220,107 @@ def _event_handler(hass: HomeAssistant, runtime: HalRuntime):  # noqa: ANN202
                 detection.behaviour.confidence * 100,
                 trail,
             )
-        # The engine tallies occurrences (even for candidates and matches
-        # suppressed by cooldown); persist whenever any counter moved.
-        if sum(b.occurrences for b in engine.behaviours.values()) > total_before:
-            hass.async_create_task(_async_save_stats(hass, runtime))
+
+        newly_matched = [
+            engine.behaviours[bid]
+            for bid, count in before.items()
+            if engine.behaviours[bid].occurrences > count
+        ]
+        if newly_matched:
+            # The engine tallies occurrences for every status (including
+            # matches suppressed by cooldown); persist whenever counters moved.
+            hass.async_create_task(_async_save(hass, runtime))
+            for behaviour in newly_matched:
+                if (
+                    behaviour.status is BehaviourStatus.CANDIDATE
+                    and behaviour.id not in runtime.suggested
+                ):
+                    runtime.suggested.add(behaviour.id)
+                    hass.async_create_task(
+                        _notify_suggestion(hass, entry, behaviour)
+                    )
 
     return handle_event
 
 
-async def _async_save_stats(hass: HomeAssistant, runtime: HalRuntime) -> None:
+async def _notify_suggestion(
+    hass: HomeAssistant, entry: ConfigEntry, behaviour: Behaviour
+) -> None:
+    """Nudge the user about a candidate pattern (secondary channel to UI)."""
+    title = "HAL1976 noticed a pattern"
+    steps = " → ".join(f"{s.entity_id} = {s.to_state}" for s in behaviour.steps)
+    message = (
+        f"“{behaviour.name}” ({steps}). Seen {behaviour.occurrences} time"
+        f"{'s' if behaviour.occurrences != 1 else ''}, confidence "
+        f"{behaviour.confidence:.0%}. Confirm it with the "
+        f"{DOMAIN}.{SERVICE_CONFIRM_BEHAVIOUR} service, or dismiss it with "
+        f"{DOMAIN}.{SERVICE_DISMISS_BEHAVIOUR} (behaviour_id: {behaviour.id})."
+    )
+    notify_entity = entry.options.get(OPTION_NOTIFY_ENTITY)
+    try:
+        if notify_entity:
+            await hass.services.async_call(
+                "notify",
+                "send_message",
+                {"title": title, "message": message},
+                target={"entity_id": notify_entity},
+                blocking=True,
+            )
+        else:
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {"title": title, "message": message},
+                blocking=True,
+            )
+    except Exception:  # noqa: BLE001 — a missing notifier must not hide detections
+        _LOGGER.exception("Failed to deliver HAL1976 suggestion for %r", behaviour.name)
+
+
+# -- confirm / dismiss services -------------------------------------------
+
+
+def _status_service_handler(
+    hass: HomeAssistant, entry: ConfigEntry, status: BehaviourStatus
+):  # noqa: ANN202
+    """Build a confirm/dismiss service handler for this config entry."""
+
+    async def handle(call: ServiceCall) -> None:
+        from homeassistant.exceptions import (  # function-local: purity guard
+            ServiceValidationError,
+        )
+
+        runtime: HalRuntime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if runtime is None:
+            raise ServiceValidationError("HAL1976 is not loaded")
+        behaviour_id = call.data[ATTR_BEHAVIOUR_ID]
+        behaviour = runtime.engine.behaviours.get(behaviour_id)
+        if behaviour is None:
+            raise ServiceValidationError(
+                f"Unknown behaviour id {behaviour_id!r}. Behaviour ids are listed "
+                f"in {hass.config.path(CONFIG_DIR, BEHAVIOURS_FILE)}."
+            )
+        if behaviour.status is status:
+            return  # idempotent
+        behaviour.status = status
+        await _async_save(hass, runtime)
+        _LOGGER.info(
+            "Behaviour %r (%s) — actions %s run on detection",
+            behaviour.name,
+            status.value,
+            "will" if status is BehaviourStatus.CONFIRMED else "will not",
+        )
+
+    return handle
+
+
+# -- persistence ------------------------------------------------------------
+
+
+async def _async_save(hass: HomeAssistant, runtime: HalRuntime) -> None:
     try:
         await hass.async_add_executor_job(
             runtime.store.save, list(runtime.engine.behaviours.values())
         )
     except Exception:  # noqa: BLE001 — persistence must not take the loop down
-        _LOGGER.exception("Failed to persist HAL1976 behaviour stats")
+        _LOGGER.exception("Failed to persist HAL1976 behaviours")

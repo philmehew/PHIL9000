@@ -51,10 +51,12 @@ desk is powered down.
 
 ## Repo status
 
-Milestones 1–2 complete: the pure domain core (models, detection engine, YAML behaviour
-store) plus the HA integration scaffold (`custom_components/hal1976/`: config flow, state
-tracking, `hal1976_behaviour_detected` event, YAML persistence, HA-harness smoke tests).
-Next: Milestone 3 — action executor, confirm/dismiss services, suggestion notifications.
+Milestones 1–3 complete: pure domain core (models, detection engine, YAML store), HA
+scaffold (config flow, state tracking, YAML persistence), and loop closure — the action
+executor calls services on detection, `hal1976.confirm_behaviour`/`hal1976.dismiss_behaviour`
+services manage the lifecycle, and candidates nudge via `notify` (or persistent
+notifications). Next: Milestone 4 — websocket API + minimal card/panel for inspecting,
+confirming, dismissing, and giving behaviours actions.
 The approved MVP plan lives in `~/.opencode/plan/hal1976-mvp.md`; `PLAN.md` is the earlier draft.
 
 Naming conventions: integration domain `hal1976`, events `hal1976_behaviour_detected`,

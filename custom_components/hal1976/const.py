@@ -9,6 +9,10 @@ DOMAIN = "hal1976"
 
 EVENT_BEHAVIOUR_DETECTED = f"{DOMAIN}_behaviour_detected"
 
+# Services
+SERVICE_CONFIRM_BEHAVIOUR = "confirm_behaviour"
+SERVICE_DISMISS_BEHAVIOUR = "dismiss_behaviour"
+
 # Config entry data
 CONF_ENTITIES = "entities"
 
