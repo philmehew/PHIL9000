@@ -12,9 +12,11 @@ engine; the adapter only executes them against Home Assistant.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from . import websocket_api
 from .const import (
     ATTR_ACTIONS,
     ATTR_BEHAVIOUR_ID,
@@ -29,8 +31,12 @@ from .const import (
     DOMAIN,
     EVENT_BEHAVIOUR_DETECTED,
     OPTION_NOTIFY_ENTITY,
+    PANEL_URL_PATH,
+    PANEL_WEBCOMPONENT,
     SERVICE_CONFIRM_BEHAVIOUR,
     SERVICE_DISMISS_BEHAVIOUR,
+    STATIC_URL_PATH,
+    UI_REGISTERED_FLAG,
 )
 from .detect import Detection, DetectionEngine
 from .models import (
@@ -69,10 +75,41 @@ class HalRuntime:
     # Candidate ids already nudged to the user this session (one nudge per
     # candidate per run; a fresh HA start allows a fresh nudge).
     suggested: set[str] = field(default_factory=set)
+    # behaviour_id -> payload of the most recent detection (in-memory
+    # evidence shown in the UI; the observation history itself is HA's).
+    last_detections: dict[str, dict] = field(default_factory=dict)
+
+    # -- mutations shared by services and the websocket API --------------
+
+    def require_behaviour(self, behaviour_id: str) -> Behaviour:
+        behaviour = self.engine.behaviours.get(behaviour_id)
+        if behaviour is None:
+            raise ValueError(f"unknown behaviour id {behaviour_id!r}")
+        return behaviour
+
+    async def async_set_status(
+        self, hass: HomeAssistant, behaviour_id: str, status: BehaviourStatus
+    ) -> Behaviour:
+        """Set a behaviour's status (idempotent) and persist immediately."""
+        behaviour = self.require_behaviour(behaviour_id)
+        if behaviour.status is not status:
+            behaviour.status = status
+            await _async_save(hass, self)
+        return behaviour
+
+    async def async_set_actions(
+        self, hass: HomeAssistant, behaviour_id: str, actions: list[BehaviourAction]
+    ) -> Behaviour:
+        """Replace a behaviour's actions and persist immediately."""
+        behaviour = self.require_behaviour(behaviour_id)
+        behaviour.actions = list(actions)
+        await _async_save(hass, self)
+        return behaviour
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
     hass.data.setdefault(DOMAIN, {})
+    websocket_api.async_setup(hass)
     return True
 
 
@@ -111,11 +148,67 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         schema=behaviour_id_schema,
     )
 
+    await _async_ensure_ui(hass)
+    if not hass.data.get(UI_REGISTERED_FLAG):
+        # http/frontend are not up yet (early startup): register the panel
+        # as soon as they load. Unsubscribed when the entry unloads.
+        from homeassistant.const import (  # function-local: purity guard
+            EVENT_COMPONENT_LOADED,
+        )
+        from homeassistant.core import callback  # function-local: purity guard
+
+        @callback
+        def _component_loaded(event: Event) -> None:
+            if event.data.get("component") in ("frontend", "http"):
+                hass.async_create_task(_async_ensure_ui(hass))
+
+        entry.async_on_unload(
+            hass.bus.async_listen(EVENT_COMPONENT_LOADED, _component_loaded)
+        )
+
     _LOGGER.debug(
         "HAL1976 observing %d entities, %d behaviours loaded",
         len(entities),
         len(behaviours),
     )
+    return True
+
+
+async def _async_ensure_ui(hass: HomeAssistant) -> bool:
+    """Serve the panel JS and add the sidebar panel (once per HA run)."""
+    if hass.data.get(UI_REGISTERED_FLAG):
+        return True
+    if "http" not in hass.config.components or "frontend" not in hass.config.components:
+        return False
+
+    from homeassistant.components import (  # function-local: purity guard
+        panel_custom,
+    )
+    from homeassistant.components.http import StaticPathConfig  # local: purity
+
+    try:
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    STATIC_URL_PATH,
+                    os.path.join(os.path.dirname(__file__), "frontend"),
+                    cache_headers=False,
+                )
+            ]
+        )
+        await panel_custom.async_register_panel(
+            hass,
+            webcomponent_name=PANEL_WEBCOMPONENT,
+            frontend_url_path=PANEL_URL_PATH,
+            sidebar_title="HAL1976",
+            sidebar_icon="mdi:brain",
+            module_url=f"{STATIC_URL_PATH}/panel.js",
+            require_admin=False,
+        )
+    except Exception:  # noqa: BLE001 — the integration works headless without UI
+        _LOGGER.exception("Failed to register the HAL1976 sidebar panel")
+        return False
+    hass.data[UI_REGISTERED_FLAG] = True
     return True
 
 
@@ -220,6 +313,10 @@ def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: HalRuntime)
                 detection.behaviour.confidence * 100,
                 trail,
             )
+            runtime.last_detections[detection.behaviour.id] = {
+                "at": detection.matched[-1].timestamp.isoformat(),
+                "observations": [obs.to_dict() for obs in detection.matched],
+            }
 
         newly_matched = [
             engine.behaviours[bid]
@@ -294,22 +391,14 @@ def _status_service_handler(
         if runtime is None:
             raise ServiceValidationError("HAL1976 is not loaded")
         behaviour_id = call.data[ATTR_BEHAVIOUR_ID]
-        behaviour = runtime.engine.behaviours.get(behaviour_id)
-        if behaviour is None:
+        try:
+            behaviour = await runtime.async_set_status(hass, behaviour_id, status)
+        except ValueError as err:
             raise ServiceValidationError(
                 f"Unknown behaviour id {behaviour_id!r}. Behaviour ids are listed "
                 f"in {hass.config.path(CONFIG_DIR, BEHAVIOURS_FILE)}."
-            )
-        if behaviour.status is status:
-            return  # idempotent
-        behaviour.status = status
-        await _async_save(hass, runtime)
-        _LOGGER.info(
-            "Behaviour %r (%s) — actions %s run on detection",
-            behaviour.name,
-            status.value,
-            "will" if status is BehaviourStatus.CONFIRMED else "will not",
-        )
+            ) from err
+        _LOGGER.info("Behaviour %r is now %s", behaviour.name, behaviour.status.value)
 
     return handle
 

@@ -51,12 +51,13 @@ desk is powered down.
 
 ## Repo status
 
-Milestones 1–3 complete: pure domain core (models, detection engine, YAML store), HA
-scaffold (config flow, state tracking, YAML persistence), and loop closure — the action
-executor calls services on detection, `hal1976.confirm_behaviour`/`hal1976.dismiss_behaviour`
-services manage the lifecycle, and candidates nudge via `notify` (or persistent
-notifications). Next: Milestone 4 — websocket API + minimal card/panel for inspecting,
-confirming, dismissing, and giving behaviours actions.
+Milestones 1–4 complete: pure domain core (models, detection engine, YAML store), HA
+scaffold (config flow, state tracking, YAML persistence), loop closure (action executor,
+`hal1976.confirm_behaviour`/`hal1976.dismiss_behaviour`, candidate nudges), and the basic
+frontend — websocket commands (`hal1976/behaviours`, `hal1976/set_status`,
+`hal1976/set_actions`) plus a plain-JS sidebar panel with confirm/dismiss/reopen and
+action editing. Next: Milestone 5 — the optional Assist-backed LLM analyser
+(`hal1976.run_analysis`, schema-validated candidate proposals, config flag default off).
 The approved MVP plan lives in `~/.opencode/plan/hal1976-mvp.md`; `PLAN.md` is the earlier draft.
 
 Naming conventions: integration domain `hal1976`, events `hal1976_behaviour_detected`,

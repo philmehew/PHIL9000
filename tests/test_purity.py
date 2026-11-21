@@ -23,6 +23,7 @@ PURE_MODULES = [
     "detect.py",
     "yaml_store.py",
     "seed.py",
+    "websocket_api.py",
 ]
 
 MODULE_LEVEL_HA_IMPORT = re.compile(r"^(?:from|import)\s+homeassistant", re.MULTILINE)

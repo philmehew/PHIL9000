@@ -27,6 +27,13 @@ DEFAULT_COOLDOWN_DEFAULT = 3600
 CONFIG_DIR = DOMAIN
 BEHAVIOURS_FILE = "behaviours.yaml"
 
+# hass.data flag: static assets + sidebar panel registered this run
+UI_REGISTERED_FLAG = f"{DOMAIN}_ui_registered"
+# Static URL for the panel JS (served from custom_components/hal1976/frontend)
+STATIC_URL_PATH = f"/{DOMAIN}_static"
+PANEL_URL_PATH = DOMAIN
+PANEL_WEBCOMPONENT = "hal1976-panel"
+
 # hal1976_behaviour_detected event payload keys
 ATTR_BEHAVIOUR_ID = "behaviour_id"
 ATTR_BEHAVIOUR_NAME = "name"
