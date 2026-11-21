@@ -169,7 +169,9 @@ class TestGapExpiredRestart:
         engine = DetectionEngine([behaviour])
         # First partial at 17:00 expires before the next sequence at 18:00.
         engine.observe_all([obs(OFFICE, "off", MON_17_30)])
-        detections = engine.observe_all([obs(OFFICE, "off", MON_18_30), obs(KITCHEN, "on", MON_18_31)])
+        detections = engine.observe_all(
+            [obs(OFFICE, "off", MON_18_30), obs(KITCHEN, "on", MON_18_31)]
+        )
         assert len(detections) == 1
 
 

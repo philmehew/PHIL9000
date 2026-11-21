@@ -26,8 +26,8 @@ from .const import (
     ATTR_OCCURRENCES,
     ATTR_STATUS,
     BEHAVIOURS_FILE,
-    CONFIG_DIR,
     CONF_ENTITIES,
+    CONFIG_DIR,
     DOMAIN,
     EVENT_BEHAVIOUR_DETECTED,
     OPTION_ANALYSIS_ENABLED,
@@ -117,12 +117,27 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG00
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load behaviours from YAML, start the engine, watch the event bus."""
     import voluptuous as vol  # function-local: purity guard
+    from homeassistant.config_entries import (  # function-local: purity guard
+        ConfigEntryNotReady,
+    )
     from homeassistant.helpers.event import (  # function-local: purity guard
         async_track_state_change_event,
     )
 
     store = BehaviourStore(hass.config.path(CONFIG_DIR, BEHAVIOURS_FILE))
-    behaviours = await hass.async_add_executor_job(store.load)
+    try:
+        behaviours = await hass.async_add_executor_job(store.load)
+    except Exception as err:
+        # Never start up "empty" over a damaged file: the next save would
+        # overwrite it. Fail the setup loudly instead and let the user fix
+        # or restore the YAML.
+        _LOGGER.exception(
+            "HAL1976 could not load %s — fix or restore the file, then retry",
+            store.path,
+        )
+        raise ConfigEntryNotReady(
+            f"{store.path} is invalid: {type(err).__name__}: {err}"
+        ) from err
 
     engine = DetectionEngine(behaviours, on_detect=_detection_callback(hass))
     runtime = HalRuntime(engine=engine, store=store)

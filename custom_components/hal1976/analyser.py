@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 
 from .models import Behaviour, BehaviourStatus, BehaviourStep
 
@@ -22,7 +22,8 @@ MAX_EVENTS_PER_ENTITY = 240
 MAX_PROPOSALS_PER_RUN = 5
 PROPOSAL_PREFIX = "llm-"
 
-PROMPT_TEMPLATE = """You analyse smart-home sensor history to find recurring household behaviour patterns.
+PROMPT_TEMPLATE = """You analyse smart-home sensor history to find recurring household behaviour \
+patterns.
 
 History of entity state changes (timestamps are UTC):
 {summary}
@@ -39,7 +40,7 @@ and optionally:
   "time_start"/"time_end": "HH:MM" UTC window in which the first step usually occurs.
 
 Rules:
-- A pattern needs 2 or more steps in a stable order; use only entity_ids that appear in the history.
+- A pattern needs 2 or more steps in a stable order; only use entities in the history.
 - max_gap_seconds is the typical maximum gap between consecutive steps (default 300).
 - Propose at most {cap} convincing patterns; if nothing is convincing, return [].
 """
@@ -64,7 +65,7 @@ def summarise_history(
         truncated = len(events_by_entity[entity_id]) - len(events)
         by_day: dict[str, list[str]] = {}
         for moment, state in events:
-            local = moment.astimezone(timezone.utc)
+            local = moment.astimezone(UTC)
             by_day.setdefault(local.strftime("%a %Y-%m-%d"), []).append(
                 f"{state}@{local.strftime('%H:%M')}"
             )
@@ -82,8 +83,8 @@ def build_prompt(summary: str, existing: list[Behaviour]) -> str:
     """Prompt for the conversation agent, steering it away from known patterns."""
     if existing:
         known = "\n".join(
-            f"- {behaviour.name} [{behaviour.status.value}]: {behaviour.description or 'no description'}"
-            for behaviour in existing
+            f"- {b.name} [{b.status.value}]: {b.description or 'no description'}"
+            for b in existing
         )
     else:
         known = "- none"

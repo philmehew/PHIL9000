@@ -22,6 +22,7 @@
         "title": "HAL1976 settings",
         "description": "Settings for pattern analysis and suggestions.",
         "data": {
+          "entities": "Entities to observe (unchanged if left empty)",
           "agent_id": "Conversation agent for pattern analysis (blank = default agent)",
           "notify_entity": "Notify entity for suggestions (blank = none)",
           "cooldown_default": "Default cooldown between detections (seconds)",

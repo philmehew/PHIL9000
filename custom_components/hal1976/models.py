@@ -9,11 +9,11 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, time
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class BehaviourStatus(str, Enum):
+class BehaviourStatus(StrEnum):
     """Lifecycle of a learned behaviour.
 
     Only CONFIRMED behaviours are ever executed. Candidates are learning;

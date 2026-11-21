@@ -51,13 +51,13 @@ desk is powered down.
 
 ## Repo status
 
-Milestones 1–5 complete: pure domain core (models, detection engine, YAML store, analyser
-prompt/parse), HA scaffold (config flow, state tracking, YAML persistence), loop closure
-(action executor, confirm/dismiss, candidate nudges), basic frontend (websocket commands
-+ plain-JS sidebar panel), and the optional Assist-backed analyser (`hal1976.run_analysis`,
-nightly option off by default, schema-validated candidates, no actions from LLM).
-Next: Milestone 6 — MVP polish: robustness, logging pass, README examples, HACS v0.1.0
-release. Known quirk to address: detection windows and analysis prompt use UTC throughout.
+Milestones 1–6 complete — **v0.1.0 (MVP)** tagged: pure domain core, HA scaffold,
+loop closure (action executor, confirm/dismiss, nudges), basic frontend (websocket
+commands + sidebar panel), Assist-backed analyser (opt-in), plus polish: ruff-clean,
+config-flow tests, corrupt-YAML setup-retry, single_config_entry, entity editing in
+options, example YAML docs, MIT license, CHANGELOG. Post-MVP ideas: local-time
+detection windows (everything is UTC today), richer evidence/history UI, action
+conditions.
 The approved MVP plan lives in `~/.opencode/plan/hal1976-mvp.md`; `PLAN.md` is the earlier draft.
 
 Naming conventions: integration domain `hal1976`, events `hal1976_behaviour_detected`,

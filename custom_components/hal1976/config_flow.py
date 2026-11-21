@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
@@ -95,6 +94,11 @@ class Hal1976OptionsFlow(OptionsFlow):
         if user_input is not None:
             agent_id = (user_input.get(OPTION_AGENT_ID) or "").strip() or None
             notify_entity = (user_input.get(OPTION_NOTIFY_ENTITY) or "").strip() or None
+            entities = sorted(user_input.get(CONF_ENTITIES) or [])
+            if entities:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry, data={**self.config_entry.data, CONF_ENTITIES: entities}
+                )
             return self.async_create_entry(
                 title="",
                 data={
@@ -115,13 +119,33 @@ class Hal1976OptionsFlow(OptionsFlow):
             )
 
         current = self.config_entry.options
+        candidates = sorted(self.hass.states.async_entity_ids())
         schema = vol.Schema(
             {
                 vol.Optional(
-                    OPTION_AGENT_ID, default=current.get(OPTION_AGENT_ID) or ""
+                    CONF_ENTITIES,
+                    default=sorted(self.config_entry.data.get(CONF_ENTITIES, [])),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            {"value": entity_id, "label": entity_id}
+                            for entity_id in candidates
+                        ],
+                        multiple=True,
+                        mode="list",
+                        sort=True,
+                    )
+                ),
+                # Selector defaults are validated by voluptuous: only supply
+                # one when a value is actually configured, otherwise the key
+                # stays absent (blank = unset).
+                vol.Optional(
+                    OPTION_AGENT_ID,
+                    default=current.get(OPTION_AGENT_ID) or vol.UNDEFINED,
                 ): EntitySelector(EntitySelectorConfig(domain="conversation")),
                 vol.Optional(
-                    OPTION_NOTIFY_ENTITY, default=current.get(OPTION_NOTIFY_ENTITY) or ""
+                    OPTION_NOTIFY_ENTITY,
+                    default=current.get(OPTION_NOTIFY_ENTITY) or vol.UNDEFINED,
                 ): EntitySelector(EntitySelectorConfig(domain="notify")),
                 vol.Optional(
                     OPTION_COOLDOWN_DEFAULT,

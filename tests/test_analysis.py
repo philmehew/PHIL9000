@@ -8,7 +8,7 @@ on disk.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -20,7 +20,6 @@ from custom_components.hal1976.analysis import (
 )
 from custom_components.hal1976.const import (
     DOMAIN,
-    OPTION_AGENT_ID,
     OPTION_ANALYSIS_ENABLED,
     OPTION_NOTIFY_ENTITY,
     SERVICE_RUN_ANALYSIS,
@@ -54,7 +53,7 @@ def auto_enable_custom(enable_custom_integrations):  # noqa: ANN001, ARG001
 
 
 async def _fake_history():
-    day = datetime(2026, 11, 23, tzinfo=timezone.utc)
+    day = datetime(2026, 11, 23, tzinfo=UTC)
     return {
         OFFICE: [(day.replace(hour=8), "on"), (day.replace(hour=17, minute=30), "off")],
         KITCHEN: [(day.replace(hour=17, minute=32), "on")],

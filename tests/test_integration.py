@@ -7,7 +7,7 @@ tests/helpers.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -83,7 +83,7 @@ async def test_events_for_unobserved_entities_ignored(hass: HomeAssistant) -> No
 
     await setup_entry(hass)
 
-    evening = datetime(2026, 11, 25, 17, 30, tzinfo=timezone.utc)
+    evening = datetime(2026, 11, 25, 17, 30, tzinfo=UTC)
     _fire_state_changed(hass, "binary_sensor.garage_presence", "on", "off", evening)
     _fire_state_changed(hass, KITCHEN, "off", "on", evening.replace(minute=32))
     await hass.async_block_till_done()

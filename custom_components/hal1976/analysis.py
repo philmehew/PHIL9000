@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from .analyser import (
@@ -53,7 +53,7 @@ async def async_collect_history(
             "the recorder/history integration is not available, so HAL1976 has "
             "no history to analyse"
         )
-    start = datetime.now(timezone.utc) - timedelta(days=days)
+    start = datetime.now(UTC) - timedelta(days=days)
     events_by_entity: dict[str, list[tuple[datetime, str]]] = {}
     for entity_id in entity_ids:
         try:

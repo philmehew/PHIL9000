@@ -7,17 +7,17 @@ can only ever produce inert, schema-valid CANDIDATE behaviours.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from custom_components.hal1976.analyser import (
     MAX_PROPOSALS_PER_RUN,
     PROPOSAL_PREFIX,
-    build_prompt,
     behaviour_signature,
+    build_prompt,
     parse_proposals,
     summarise_history,
 )
-from custom_components.hal1976.models import Behaviour, BehaviourStatus
+from custom_components.hal1976.models import BehaviourStatus
 from custom_components.hal1976.seed import end_of_work_day
 
 OFFICE = "binary_sensor.office_presence"
@@ -28,7 +28,7 @@ def _events(day_offsets=3):
     """Evening handoff at 17:30/17:32 UTC on consecutive days."""
     events = {OFFICE: [], KITCHEN: []}
     for offset in range(day_offsets):
-        day = datetime(2026, 11, 20 + offset, tzinfo=timezone.utc)
+        day = datetime(2026, 11, 20 + offset, tzinfo=UTC)
         events[OFFICE].append((day.replace(hour=8), "on"))
         events[OFFICE].append((day.replace(hour=17, minute=30), "off"))
         events[KITCHEN].append((day.replace(hour=17, minute=32), "on"))
@@ -48,7 +48,7 @@ def test_summarise_lists_entities_days_and_states():
 
 
 def test_summarise_caps_long_histories():
-    events = {"sensor.x": [(datetime(2026, 1, 1, tzinfo=timezone.utc), str(i)) for i in range(300)]}
+    events = {"sensor.x": [(datetime(2026, 1, 1, tzinfo=UTC), str(i)) for i in range(300)]}
     summary = summarise_history(events)
     assert "(+60 earlier events)" in summary
 
@@ -117,7 +117,13 @@ def test_malformed_proposals_are_dropped_individually():
     reply = json.dumps(
         [
             {"name": "One step only", "steps": [{"entity_id": OFFICE, "to_state": "off"}]},
-            {"name": "No entity", "steps": [{"entity_id": "office", "to_state": "off"}, {"entity_id": KITCHEN, "to_state": "on"}]},
+            {
+                "name": "No entity",
+                "steps": [
+                    {"entity_id": "office", "to_state": "off"},
+                    {"entity_id": KITCHEN, "to_state": "on"},
+                ],
+            },
             {"name": "Not a dict"},
             json.loads(_proposal_json())[0],
         ]

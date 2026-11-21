@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant, ServiceCall, State
@@ -20,8 +21,8 @@ ACTION_SERVICE = "capture"
 ACTION_TARGET = "test.target_entity"
 
 
-def behaviours_path(hass: HomeAssistant):
-    return hass.config.path("hal1976", "behaviours.yaml")
+def behaviours_path(hass: HomeAssistant) -> Path:
+    return Path(hass.config.path("hal1976", "behaviours.yaml"))
 
 
 def seed_behaviours(hass: HomeAssistant, *behaviours) -> None:
@@ -75,7 +76,7 @@ def _fire_state_changed(
 
 async def fire_evening(hass: HomeAssistant, day: int) -> None:
     """Office off at 17:30, kitchen on at 17:32 on a November 2026 weekday."""
-    evening = datetime(2026, 11, day, 17, 30, tzinfo=timezone.utc)
+    evening = datetime(2026, 11, day, 17, 30, tzinfo=UTC)
     _fire_state_changed(hass, OFFICE, "on", "off", evening)
     _fire_state_changed(hass, KITCHEN, "off", "on", evening.replace(minute=32))
     await hass.async_block_till_done()
