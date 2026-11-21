@@ -53,8 +53,7 @@ desk is powered down.
 
 Milestone 1 complete: the `hal1976` domain package (models, detection engine, YAML behaviour
 store) with a green test suite. Next: the Home Assistant scaffold (`custom_components/hal1976/`).
-The approved MVP plan lives in `~/.opencode/plan/hal3000-mvp.md` (kept under its original
-name so the approved review stays linked); `PLAN.md` is the earlier draft.
+The approved MVP plan lives in `~/.opencode/plan/hal1976-mvp.md`; `PLAN.md` is the earlier draft.
 
 Naming conventions: integration domain `hal1976`, events `hal1976_behaviour_detected`,
 services `hal1976.*` (e.g. `hal1976.confirm_pattern`).
