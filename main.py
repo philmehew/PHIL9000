@@ -1,9 +1,9 @@
-"""Tiny demo: replay a synthetic evening and show HAL3000 detecting a behaviour."""
+"""Tiny demo: replay a synthetic evening and show HAL1976 detecting a behaviour."""
 
 from datetime import datetime
 
-from hal3000 import BehaviourAction, BehaviourStatus, DetectionEngine, Observation
-from hal3000.seed import end_of_work_day
+from hal1976 import BehaviourAction, BehaviourStatus, DetectionEngine, Observation
+from hal1976.seed import end_of_work_day
 
 
 def main() -> None:

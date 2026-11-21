@@ -1,4 +1,4 @@
-"""Domain models for HAL3000 behaviours, patterns, and observations.
+"""Domain models for HAL1976 behaviours, patterns, and observations.
 
 Pure Python — no Home Assistant imports. Everything is UI-agnostic data that
 can be serialised to/from YAML (see yaml_store.py).

@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "hal3000"
+name = "hal1976"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -4,9 +4,9 @@ from datetime import datetime, time
 
 import pytest
 
-from hal3000.detect import DetectionEngine, _in_time_window
-from hal3000.models import Behaviour, BehaviourStatus, BehaviourStep, Observation
-from hal3000.seed import end_of_work_day
+from hal1976.detect import DetectionEngine, _in_time_window
+from hal1976.models import Behaviour, BehaviourStatus, BehaviourStep, Observation
+from hal1976.seed import end_of_work_day
 
 MON_17_30 = datetime(2026, 11, 23, 17, 30)  # a Monday
 MON_17_32 = MON_17_30.replace(minute=32)

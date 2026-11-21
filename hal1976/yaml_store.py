@@ -1,6 +1,6 @@
 """YAML persistence for behaviour definitions.
 
-Per the MVP plan, HAL3000's own storage is limited to behaviours (the
+Per the MVP plan, HAL1976's own storage is limited to behaviours (the
 observation data lives in HA's recorder). YAML in the config directory is
 user-editable and versionable; writes are atomic.
 """

@@ -1,7 +1,7 @@
-"""HAL3000 — learns household behaviour from Home Assistant sensor data.
+"""HAL1976 — learns household behaviour from Home Assistant sensor data.
 
 Core domain logic lives here with no Home Assistant imports; the
-custom_components/hal3000 integration is a thin adapter over the recorder,
+custom_components/hal1976 integration is a thin adapter over the recorder,
 event bus, Assist, and services.
 """
 
