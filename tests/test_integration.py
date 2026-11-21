@@ -21,6 +21,7 @@ from custom_components.hal1976.const import (
     OPTION_NOTIFY_ENTITY,
     SERVICE_CONFIRM_BEHAVIOUR,
     SERVICE_DISMISS_BEHAVIOUR,
+    SERVICE_RUN_ANALYSIS,
 )
 from custom_components.hal1976.models import BehaviourAction, BehaviourStatus
 from custom_components.hal1976.seed import end_of_work_day
@@ -200,6 +201,12 @@ def test_services_yaml_matches_registered_services() -> None:
         "custom_components/hal1976/services.yaml"
     )
     declared = load_yaml_dict(str(path))
-    assert set(declared) == {SERVICE_CONFIRM_BEHAVIOUR, SERVICE_DISMISS_BEHAVIOUR}
-    for service in declared.values():
+    assert set(declared) == {
+        SERVICE_CONFIRM_BEHAVIOUR,
+        SERVICE_DISMISS_BEHAVIOUR,
+        SERVICE_RUN_ANALYSIS,
+    }
+    for name, service in declared.items():
+        if name == SERVICE_RUN_ANALYSIS:
+            continue  # takes no fields
         assert "fields" in service and "behaviour_id" in service["fields"]

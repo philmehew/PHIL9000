@@ -12,6 +12,7 @@ EVENT_BEHAVIOUR_DETECTED = f"{DOMAIN}_behaviour_detected"
 # Services
 SERVICE_CONFIRM_BEHAVIOUR = "confirm_behaviour"
 SERVICE_DISMISS_BEHAVIOUR = "dismiss_behaviour"
+SERVICE_RUN_ANALYSIS = "run_analysis"
 
 # Config entry data
 CONF_ENTITIES = "entities"
@@ -20,6 +21,8 @@ CONF_ENTITIES = "entities"
 OPTION_AGENT_ID = "agent_id"
 OPTION_NOTIFY_ENTITY = "notify_entity"
 OPTION_COOLDOWN_DEFAULT = "cooldown_default"
+OPTION_ANALYSIS_ENABLED = "analysis_enabled"
+OPTION_ANALYSIS_DAYS = "analysis_days"
 
 DEFAULT_COOLDOWN_DEFAULT = 3600
 

@@ -23,6 +23,9 @@ PURE_MODULES = [
     "detect.py",
     "yaml_store.py",
     "seed.py",
+    "analyser.py",
+    "analysis.py",
+    "notifier.py",
     "websocket_api.py",
 ]
 

@@ -14,6 +14,14 @@ confirm_behaviour:
       name: Behaviour ID
       description: The id of the candidate behaviour to confirm.
 
+run_analysis:
+  name: Run pattern analysis
+  description: >-
+    Ask the household's conversation agent to analyse the recent history of
+    the observed entities and propose new candidate behaviours. Requires the
+    recorder and a configured conversation agent. Proposals are always
+    candidates — nothing acts until you confirm them.
+
 dismiss_behaviour:
   name: Dismiss behaviour
   description: >-

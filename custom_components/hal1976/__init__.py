@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from . import websocket_api
+from . import analysis, notifier, websocket_api
 from .const import (
     ATTR_ACTIONS,
     ATTR_BEHAVIOUR_ID,
@@ -30,11 +30,12 @@ from .const import (
     CONF_ENTITIES,
     DOMAIN,
     EVENT_BEHAVIOUR_DETECTED,
-    OPTION_NOTIFY_ENTITY,
+    OPTION_ANALYSIS_ENABLED,
     PANEL_URL_PATH,
     PANEL_WEBCOMPONENT,
     SERVICE_CONFIRM_BEHAVIOUR,
     SERVICE_DISMISS_BEHAVIOUR,
+    SERVICE_RUN_ANALYSIS,
     STATIC_URL_PATH,
     UI_REGISTERED_FLAG,
 )
@@ -147,6 +148,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _status_service_handler(hass, entry, BehaviourStatus.DISMISSED),
         schema=behaviour_id_schema,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RUN_ANALYSIS,
+        _run_analysis_service_handler(hass, entry),
+        schema=vol.Schema({}),
+    )
+
+    if entry.options.get(OPTION_ANALYSIS_ENABLED, False):
+        from homeassistant.core import callback  # function-local: purity guard
+        from homeassistant.helpers.event import (  # function-local: purity guard
+            async_track_time_change,
+        )
+
+        @callback
+        def _nightly(now) -> None:  # noqa: ANN001
+            hass.async_create_task(_async_nightly_analysis(hass, entry, runtime))
+
+        entry.async_on_unload(
+            async_track_time_change(hass, _nightly, hour=3, minute=30, second=0)
+        )
+        _LOGGER.debug("HAL1976 nightly analysis scheduled (03:30)")
 
     await _async_ensure_ui(hass)
     if not hass.data.get(UI_REGISTERED_FLAG):
@@ -353,25 +375,7 @@ async def _notify_suggestion(
         f"{DOMAIN}.{SERVICE_CONFIRM_BEHAVIOUR} service, or dismiss it with "
         f"{DOMAIN}.{SERVICE_DISMISS_BEHAVIOUR} (behaviour_id: {behaviour.id})."
     )
-    notify_entity = entry.options.get(OPTION_NOTIFY_ENTITY)
-    try:
-        if notify_entity:
-            await hass.services.async_call(
-                "notify",
-                "send_message",
-                {"title": title, "message": message},
-                target={"entity_id": notify_entity},
-                blocking=True,
-            )
-        else:
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {"title": title, "message": message},
-                blocking=True,
-            )
-    except Exception:  # noqa: BLE001 — a missing notifier must not hide detections
-        _LOGGER.exception("Failed to deliver HAL1976 suggestion for %r", behaviour.name)
+    await notifier.async_notify(hass, entry, title, message)
 
 
 # -- confirm / dismiss services -------------------------------------------
@@ -401,6 +405,37 @@ def _status_service_handler(
         _LOGGER.info("Behaviour %r is now %s", behaviour.name, behaviour.status.value)
 
     return handle
+
+
+# -- LLM analysis (optional, Milestone 5) -------------------------------------
+
+
+def _run_analysis_service_handler(hass: HomeAssistant, entry: ConfigEntry):  # noqa: ANN202
+    """hal1976.run_analysis: on-demand history analysis via the conversation agent."""
+
+    async def handle(call: ServiceCall) -> None:  # noqa: ARG001
+        from homeassistant.exceptions import (  # function-local: purity guard
+            ServiceValidationError,
+        )
+
+        runtime: HalRuntime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if runtime is None:
+            raise ServiceValidationError("HAL1976 is not loaded")
+        try:
+            await analysis.async_run_analysis(hass, entry, runtime)
+        except analysis.AnalysisUnavailableError as err:
+            raise ServiceValidationError(str(err)) from err
+
+    return handle
+
+
+async def _async_nightly_analysis(
+    hass: HomeAssistant, entry: ConfigEntry, runtime: HalRuntime
+) -> None:
+    try:
+        await analysis.async_run_analysis(hass, entry, runtime)
+    except analysis.AnalysisUnavailableError as err:
+        _LOGGER.warning("Scheduled HAL1976 analysis skipped: %s", err)
 
 
 # -- persistence ------------------------------------------------------------

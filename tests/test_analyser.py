@@ -1,0 +1,198 @@
+"""Pure tests for the analyser: summarise, prompt, and proposal validation.
+
+These run without Home Assistant. The guardrails matter most here: the LLM
+can only ever produce inert, schema-valid CANDIDATE behaviours.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+from custom_components.hal1976.analyser import (
+    MAX_PROPOSALS_PER_RUN,
+    PROPOSAL_PREFIX,
+    build_prompt,
+    behaviour_signature,
+    parse_proposals,
+    summarise_history,
+)
+from custom_components.hal1976.models import Behaviour, BehaviourStatus
+from custom_components.hal1976.seed import end_of_work_day
+
+OFFICE = "binary_sensor.office_presence"
+KITCHEN = "binary_sensor.kitchen_presence"
+
+
+def _events(day_offsets=3):
+    """Evening handoff at 17:30/17:32 UTC on consecutive days."""
+    events = {OFFICE: [], KITCHEN: []}
+    for offset in range(day_offsets):
+        day = datetime(2026, 11, 20 + offset, tzinfo=timezone.utc)
+        events[OFFICE].append((day.replace(hour=8), "on"))
+        events[OFFICE].append((day.replace(hour=17, minute=30), "off"))
+        events[KITCHEN].append((day.replace(hour=17, minute=32), "on"))
+    return events
+
+
+# -- summarise ----------------------------------------------------------------
+
+
+def test_summarise_lists_entities_days_and_states():
+    summary = summarise_history(_events())
+    lines = summary.splitlines()
+    assert len(lines) == 2  # one line per entity, sorted
+    assert lines[0].startswith(KITCHEN)
+    assert "off@17:30" in summary and "on@17:32" in summary
+    assert "Fri 2026-11-20" in summary
+
+
+def test_summarise_caps_long_histories():
+    events = {"sensor.x": [(datetime(2026, 1, 1, tzinfo=timezone.utc), str(i)) for i in range(300)]}
+    summary = summarise_history(events)
+    assert "(+60 earlier events)" in summary
+
+
+# -- prompt --------------------------------------------------------------------
+
+
+def test_prompt_includes_summary_and_known_behaviours():
+    prompt = build_prompt("OFFICE TEXT", [end_of_work_day()])
+    assert "OFFICE TEXT" in prompt
+    assert "End of work day" in prompt
+    assert "confirmed" in prompt
+    assert "ONLY a JSON array" in prompt
+    empty = build_prompt("S", [])
+    assert "- none" in empty
+
+
+# -- proposal parsing ------------------------------------------------------------
+
+
+def _proposal_json(**overrides) -> str:
+    proposal = {
+        "name": "Evening handoff",
+        "description": "Office off then kitchen on.",
+        "steps": [
+            {"entity_id": OFFICE, "to_state": "off"},
+            {"entity_id": KITCHEN, "to_state": "on", "max_gap_seconds": 240},
+        ],
+        "weekdays": [1, 2, 3, 4, 5],
+        "time_start": "17:00",
+        "time_end": "19:00",
+    }
+    proposal.update(overrides)
+    return json.dumps([proposal])
+
+
+def test_valid_proposals_become_inert_candidates():
+    proposals = parse_proposals(_proposal_json())
+    assert len(proposals) == 1
+    behaviour = proposals[0]
+    assert behaviour.status is BehaviourStatus.CANDIDATE
+    assert behaviour.actions == []  # LLM never attaches actions
+    assert behaviour.occurrences == 0
+    assert behaviour.id.startswith(PROPOSAL_PREFIX)
+    assert behaviour.steps[1].max_gap_seconds == 240
+    assert behaviour.weekdays == {1, 2, 3, 4, 5}
+    assert behaviour.time_start.hour == 17
+
+
+def test_proposals_survive_markdown_fencing_and_prose():
+    fenced = f"Here you go:\n```json\n{_proposal_json()}\n```\nHope that helps!"
+    assert len(parse_proposals(fenced)) == 1
+    prose = f"I found this pattern: {_proposal_json()} end of report."
+    assert len(parse_proposals(prose)) == 1
+
+
+def test_wrapped_object_and_empty_replies():
+    wrapped = json.dumps({"behaviours": json.loads(_proposal_json())})
+    assert len(parse_proposals(wrapped)) == 1
+    assert parse_proposals("Sorry, no patterns found.") == []
+    assert parse_proposals("") == []
+    assert parse_proposals("[oops") == []
+
+
+def test_malformed_proposals_are_dropped_individually():
+    reply = json.dumps(
+        [
+            {"name": "One step only", "steps": [{"entity_id": OFFICE, "to_state": "off"}]},
+            {"name": "No entity", "steps": [{"entity_id": "office", "to_state": "off"}, {"entity_id": KITCHEN, "to_state": "on"}]},
+            {"name": "Not a dict"},
+            json.loads(_proposal_json())[0],
+        ]
+    )
+    proposals = parse_proposals(reply)
+    assert [b.name for b in proposals] == ["Evening handoff"]
+
+
+def test_actions_from_llm_are_ignored_and_bad_fields_defaulted():
+    reply = json.dumps(
+        [
+            {
+                "name": "Tempting automation",
+                "steps": [
+                    {"entity_id": OFFICE, "to_state": "off"},
+                    {"entity_id": KITCHEN, "to_state": "on", "max_gap_seconds": "huge"},
+                ],
+                "weekdays": [1, 9, "x", None],
+                "time_start": "17:00",  # no time_end -> window dropped entirely
+                "actions": [{"domain": "switch", "service": "turn_off"}],
+            }
+        ]
+    )
+    behaviour = parse_proposals(reply)[0]
+    assert behaviour.actions == []
+    assert behaviour.steps[1].max_gap_seconds == 300  # invalid gap -> default
+    assert behaviour.weekdays == {1}
+    assert behaviour.time_start is None and behaviour.time_end is None
+
+
+def test_duplicates_of_existing_behaviours_are_skipped():
+    existing = end_of_work_day()
+    same = json.dumps(
+        [
+            {
+                "name": "Slightly different name",
+                "steps": [
+                    {"entity_id": OFFICE, "to_state": "off"},
+                    {"entity_id": KITCHEN, "to_state": "on", "max_gap_seconds": 300},
+                ],
+                "weekdays": [1, 2, 3, 4, 5],
+                "time_start": "16:00",
+                "time_end": "19:00",
+            }
+        ]
+    )
+    assert parse_proposals(same, [existing]) == []
+
+
+def test_ids_are_deterministic_and_reruns_are_idempotent():
+    first = parse_proposals(_proposal_json())
+    again = parse_proposals(_proposal_json(), first)
+    second_run = parse_proposals(_proposal_json())
+    assert again == []
+    assert first[0].id == second_run[0].id
+
+
+def test_proposal_cap_is_enforced():
+    reply = json.dumps(
+        [
+            {
+                "name": f"Pattern {i}",
+                "steps": [
+                    {"entity_id": f"sensor.a{i}", "to_state": "on"},
+                    {"entity_id": f"sensor.b{i}", "to_state": "off"},
+                ],
+            }
+            for i in range(MAX_PROPOSALS_PER_RUN + 3)
+        ]
+    )
+    assert len(parse_proposals(reply)) == MAX_PROPOSALS_PER_RUN
+
+
+def test_signature_is_stable_and_action_free():
+    proposals = parse_proposals(_proposal_json())
+    assert behaviour_signature(proposals[0]) == behaviour_signature(
+        parse_proposals(_proposal_json())[0]
+    )

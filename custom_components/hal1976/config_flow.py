@@ -12,6 +12,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -20,11 +21,14 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
 )
 
+from .analyser import DEFAULT_LOOKBACK_DAYS
 from .const import (
     CONF_ENTITIES,
     DEFAULT_COOLDOWN_DEFAULT,
     DOMAIN,
     OPTION_AGENT_ID,
+    OPTION_ANALYSIS_DAYS,
+    OPTION_ANALYSIS_ENABLED,
     OPTION_COOLDOWN_DEFAULT,
     OPTION_NOTIFY_ENTITY,
 )
@@ -53,6 +57,8 @@ class Hal1976ConfigFlow(ConfigFlow, domain=DOMAIN):
                         OPTION_AGENT_ID: None,
                         OPTION_NOTIFY_ENTITY: None,
                         OPTION_COOLDOWN_DEFAULT: DEFAULT_COOLDOWN_DEFAULT,
+                        OPTION_ANALYSIS_ENABLED: False,
+                        OPTION_ANALYSIS_DAYS: DEFAULT_LOOKBACK_DAYS,
                     },
                 )
 
@@ -99,6 +105,12 @@ class Hal1976OptionsFlow(OptionsFlow):
                             OPTION_COOLDOWN_DEFAULT, DEFAULT_COOLDOWN_DEFAULT
                         )
                     ),
+                    OPTION_ANALYSIS_ENABLED: bool(
+                        user_input.get(OPTION_ANALYSIS_ENABLED, False)
+                    ),
+                    OPTION_ANALYSIS_DAYS: int(
+                        user_input.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS)
+                    ),
                 },
             )
 
@@ -117,6 +129,14 @@ class Hal1976OptionsFlow(OptionsFlow):
                 ): NumberSelector(
                     NumberSelectorConfig(min=0, max=86400, step=60, mode="box")
                 ),
+                vol.Optional(
+                    OPTION_ANALYSIS_ENABLED,
+                    default=current.get(OPTION_ANALYSIS_ENABLED, False),
+                ): BooleanSelector(),
+                vol.Optional(
+                    OPTION_ANALYSIS_DAYS,
+                    default=current.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS),
+                ): NumberSelector(NumberSelectorConfig(min=1, max=90, step=1, mode="box")),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
