@@ -1,0 +1,24 @@
+[project]
+name = "hal3000"
+version = "0.1.0"
+description = "HAL3000 learns household behaviour by deriving patterns from Home Assistant sensor data"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hal3000"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
