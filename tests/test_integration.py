@@ -13,7 +13,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.hal1976.const import (
+from custom_components.phil9000.const import (
     ATTR_ACTIONS,
     ATTR_BEHAVIOUR_ID,
     DOMAIN,
@@ -23,8 +23,8 @@ from custom_components.hal1976.const import (
     SERVICE_DISMISS_BEHAVIOUR,
     SERVICE_RUN_ANALYSIS,
 )
-from custom_components.hal1976.models import BehaviourAction, BehaviourStatus
-from custom_components.hal1976.seed import end_of_work_day
+from custom_components.phil9000.models import BehaviourAction, BehaviourStatus
+from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
     ACTION_DOMAIN,
     ACTION_SERVICE,
@@ -198,7 +198,7 @@ def test_services_yaml_matches_registered_services() -> None:
     from homeassistant.util.yaml import load_yaml_dict
 
     path = Path(__file__).resolve().parent.parent / (
-        "custom_components/hal1976/services.yaml"
+        "custom_components/phil9000/services.yaml"
     )
     declared = load_yaml_dict(str(path))
     assert set(declared) == {

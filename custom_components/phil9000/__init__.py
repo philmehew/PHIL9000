@@ -1,4 +1,4 @@
-"""HAL1976 — learns household behaviour from Home Assistant sensor data.
+"""PHIL9000 — learns household behaviour from Home Assistant sensor data.
 
 The pure domain logic (models, detection engine, YAML store) lives in this
 package with **no Home Assistant imports**: every ``homeassistant.*`` import
@@ -68,7 +68,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
-class HalRuntime:
+class Phil9000Runtime:
     """Per-config-entry runtime state, stored in hass.data[DOMAIN]."""
 
     engine: DetectionEngine
@@ -132,7 +132,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # overwrite it. Fail the setup loudly instead and let the user fix
         # or restore the YAML.
         _LOGGER.exception(
-            "HAL1976 could not load %s — fix or restore the file, then retry",
+            "PHIL9000 could not load %s — fix or restore the file, then retry",
             store.path,
         )
         raise ConfigEntryNotReady(
@@ -140,7 +140,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ) from err
 
     engine = DetectionEngine(behaviours, on_detect=_detection_callback(hass))
-    runtime = HalRuntime(engine=engine, store=store)
+    runtime = Phil9000Runtime(engine=engine, store=store)
     hass.data[DOMAIN][entry.entry_id] = runtime
 
     entities: list[str] = list(entry.data[CONF_ENTITIES])
@@ -183,7 +183,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(
             async_track_time_change(hass, _nightly, hour=3, minute=30, second=0)
         )
-        _LOGGER.debug("HAL1976 nightly analysis scheduled (03:30)")
+        _LOGGER.debug("PHIL9000 nightly analysis scheduled (03:30)")
 
     await _async_ensure_ui(hass)
     if not hass.data.get(UI_REGISTERED_FLAG):
@@ -204,7 +204,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     _LOGGER.debug(
-        "HAL1976 observing %d entities, %d behaviours loaded",
+        "PHIL9000 observing %d entities, %d behaviours loaded",
         len(entities),
         len(behaviours),
     )
@@ -237,20 +237,20 @@ async def _async_ensure_ui(hass: HomeAssistant) -> bool:
             hass,
             webcomponent_name=PANEL_WEBCOMPONENT,
             frontend_url_path=PANEL_URL_PATH,
-            sidebar_title="HAL1976",
+            sidebar_title="PHIL9000",
             sidebar_icon="mdi:brain",
             module_url=f"{STATIC_URL_PATH}/panel.js",
             require_admin=False,
         )
     except Exception:  # noqa: BLE001 — the integration works headless without UI
-        _LOGGER.exception("Failed to register the HAL1976 sidebar panel")
+        _LOGGER.exception("Failed to register the PHIL9000 sidebar panel")
         return False
     hass.data[UI_REGISTERED_FLAG] = True
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    runtime: HalRuntime | None = hass.data[DOMAIN].pop(entry.entry_id, None)
+    runtime: Phil9000Runtime | None = hass.data[DOMAIN].pop(entry.entry_id, None)
     if runtime is not None:
         await _async_save(hass, runtime)
     return True
@@ -319,7 +319,7 @@ async def _execute_actions(hass: HomeAssistant, behaviour: Behaviour) -> None:
 # -- observation → engine → suggestions ----------------------------------
 
 
-def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: HalRuntime):  # noqa: ANN202
+def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Runtime):  # noqa: ANN202
     """Translate state_changed events into Observations for the engine."""
     from homeassistant.core import callback  # function-local: purity guard
 
@@ -381,7 +381,7 @@ async def _notify_suggestion(
     hass: HomeAssistant, entry: ConfigEntry, behaviour: Behaviour
 ) -> None:
     """Nudge the user about a candidate pattern (secondary channel to UI)."""
-    title = "HAL1976 noticed a pattern"
+    title = "PHIL9000 noticed a pattern"
     steps = " → ".join(f"{s.entity_id} = {s.to_state}" for s in behaviour.steps)
     message = (
         f"“{behaviour.name}” ({steps}). Seen {behaviour.occurrences} time"
@@ -406,9 +406,9 @@ def _status_service_handler(
             ServiceValidationError,
         )
 
-        runtime: HalRuntime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        runtime: Phil9000Runtime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         if runtime is None:
-            raise ServiceValidationError("HAL1976 is not loaded")
+            raise ServiceValidationError("PHIL9000 is not loaded")
         behaviour_id = call.data[ATTR_BEHAVIOUR_ID]
         try:
             behaviour = await runtime.async_set_status(hass, behaviour_id, status)
@@ -426,16 +426,16 @@ def _status_service_handler(
 
 
 def _run_analysis_service_handler(hass: HomeAssistant, entry: ConfigEntry):  # noqa: ANN202
-    """hal1976.run_analysis: on-demand history analysis via the conversation agent."""
+    """phil9000.run_analysis: on-demand history analysis via the conversation agent."""
 
     async def handle(call: ServiceCall) -> None:  # noqa: ARG001
         from homeassistant.exceptions import (  # function-local: purity guard
             ServiceValidationError,
         )
 
-        runtime: HalRuntime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        runtime: Phil9000Runtime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         if runtime is None:
-            raise ServiceValidationError("HAL1976 is not loaded")
+            raise ServiceValidationError("PHIL9000 is not loaded")
         try:
             await analysis.async_run_analysis(hass, entry, runtime)
         except analysis.AnalysisUnavailableError as err:
@@ -445,21 +445,21 @@ def _run_analysis_service_handler(hass: HomeAssistant, entry: ConfigEntry):  # n
 
 
 async def _async_nightly_analysis(
-    hass: HomeAssistant, entry: ConfigEntry, runtime: HalRuntime
+    hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Runtime
 ) -> None:
     try:
         await analysis.async_run_analysis(hass, entry, runtime)
     except analysis.AnalysisUnavailableError as err:
-        _LOGGER.warning("Scheduled HAL1976 analysis skipped: %s", err)
+        _LOGGER.warning("Scheduled PHIL9000 analysis skipped: %s", err)
 
 
 # -- persistence ------------------------------------------------------------
 
 
-async def _async_save(hass: HomeAssistant, runtime: HalRuntime) -> None:
+async def _async_save(hass: HomeAssistant, runtime: Phil9000Runtime) -> None:
     try:
         await hass.async_add_executor_job(
             runtime.store.save, list(runtime.engine.behaviours.values())
         )
     except Exception:  # noqa: BLE001 — persistence must not take the loop down
-        _LOGGER.exception("Failed to persist HAL1976 behaviours")
+        _LOGGER.exception("Failed to persist PHIL9000 behaviours")

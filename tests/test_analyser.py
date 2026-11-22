@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from custom_components.hal1976.analyser import (
+from custom_components.phil9000.analyser import (
     MAX_PROPOSALS_PER_RUN,
     PROPOSAL_PREFIX,
     behaviour_signature,
@@ -17,8 +17,8 @@ from custom_components.hal1976.analyser import (
     parse_proposals,
     summarise_history,
 )
-from custom_components.hal1976.models import BehaviourStatus
-from custom_components.hal1976.seed import end_of_work_day
+from custom_components.phil9000.models import BehaviourStatus
+from custom_components.phil9000.seed import end_of_work_day
 
 OFFICE = "binary_sensor.office_presence"
 KITCHEN = "binary_sensor.kitchen_presence"

@@ -2,15 +2,15 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up HAL1976",
-        "description": "Choose the entities HAL1976 should observe. It only watches at first — nothing is ever acted on until you confirm a learned behaviour.",
+        "title": "Set up PHIL9000",
+        "description": "Choose the entities PHIL9000 should observe. It only watches at first — nothing is ever acted on until you confirm a learned behaviour.",
         "data": {
           "entities": "Entities to observe"
         }
       }
     },
     "abort": {
-      "already_configured": "HAL1976 is already set up."
+      "already_configured": "PHIL9000 is already set up."
     },
     "error": {
       "no_entities": "Select at least one entity to observe."
@@ -19,7 +19,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "HAL1976 settings",
+        "title": "PHIL9000 settings",
         "description": "Settings for pattern analysis and suggestions.",
         "data": {
           "entities": "Entities to observe (unchanged if left empty)",

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-    from . import HalRuntime
+    from . import Phil9000Runtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def async_collect_history(
 
     if "recorder" not in hass.config.components:
         raise AnalysisUnavailableError(
-            "the recorder/history integration is not available, so HAL1976 has "
+            "the recorder/history integration is not available, so PHIL9000 has "
             "no history to analyse"
         )
     start = datetime.now(UTC) - timedelta(days=days)
@@ -97,7 +97,7 @@ async def async_call_agent(
 async def async_run_analysis(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    runtime: HalRuntime,
+    runtime: Phil9000Runtime,
     *,
     history_provider: HistoryProvider | None = None,
     agent_call: AgentCall | None = None,
@@ -139,11 +139,11 @@ async def async_run_analysis(
     names = ", ".join(b.name for b in proposals)
     message = (
         f"Proposed {len(proposals)} new candidate behaviour(s): {names}. "
-        "Review them in the HAL1976 panel — nothing acts until you confirm."
+        "Review them in the PHIL9000 panel — nothing acts until you confirm."
         if proposals
         else "No new convincing patterns this time."
     )
-    _LOGGER.info("HAL1976 analysis: %s", message)
+    _LOGGER.info("PHIL9000 analysis: %s", message)
     if notify:
-        await async_notify(hass, entry, "HAL1976 pattern analysis", message)
+        await async_notify(hass, entry, "PHIL9000 pattern analysis", message)
     return len(proposals)

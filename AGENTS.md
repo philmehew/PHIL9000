@@ -1,13 +1,13 @@
-# AGENTS.md — HAL1976
+# AGENTS.md — PHIL9000
 
-## What HAL1976 is
+## What PHIL9000 is
 
-HAL1976 is a Home Assistant integration (HACS/Marketplace installable) that learns a household's
+PHIL9000 is a Home Assistant integration (HACS/Marketplace installable) that learns a household's
 behaviour by deriving patterns from Home Assistant sensor and entity data — presence sensors,
 device state changes, time-of-day rhythms, etc.
 
 **Example pattern:** an office presence sensor stops seeing a user at ~17:30; a couple of minutes
-later the kitchen presence sensor sees them. That's likely "end of the work day". HAL1976 could
+later the kitchen presence sensor sees them. That's likely "end of the work day". PHIL9000 could
 then suggest (or, once confirmed, perform) a courteous "welcome home" action and check the office
 desk is powered down.
 
@@ -19,7 +19,7 @@ desk is powered down.
    parsing/analysis of data to identify and firm up behavioural patterns. Detecting a learned
    pattern and executing its action must be pure Python logic (criteria matching → action) with
    no LLM in the loop. Keep this separation architectural, not incidental.
-3. **User in the loop.** HAL1976 offers information on what it has learned and makes suggestions
+3. **User in the loop.** PHIL9000 offers information on what it has learned and makes suggestions
    for what it should do. Users must be able to understand learned behaviours (and the entities
    involved), offer corrections, and define/adjust actions for when behaviours are detected.
 4. **MVP before frontend.** No concrete frontend exists yet. Design behaviours, patterns, and
@@ -34,7 +34,7 @@ desk is powered down.
 - **Behaviour (pattern):** a named, recurring sequence/correlation of observations with typical
   timing and confidence (e.g. "end of work day": office presence off → kitchen presence on, within
   ~2–5 min, weekdays ~17:00–18:00).
-- **Suggestion:** HAL1976's proposal to the user: "I've noticed X — is this the end of your work
+- **Suggestion:** PHIL9000's proposal to the user: "I've noticed X — is this the end of your work
   day? Would you like me to do Y when it happens?"
 - **Confirmed behaviour / action:** a behaviour the user has confirmed, plus the action(s) to
   execute when it is detected. Executed via pure Python matching, no LLM.
@@ -42,7 +42,7 @@ desk is powered down.
 ## Technical constraints
 
 - Python 3.13, managed with `uv` (`pyproject.toml`, `.python-version`).
-- Target: Home Assistant custom integration structure (`custom_components/hal1976/`), installable
+- Target: Home Assistant custom integration structure (`custom_components/phil9000/`), installable
   via HACS/Marketplace.
 - Persistence must survive restarts (Home Assistant storage helpers or similar) — learned patterns
   are valuable and must not be lost.
@@ -58,7 +58,7 @@ config-flow tests, corrupt-YAML setup-retry, single_config_entry, entity editing
 options, example YAML docs, MIT license, CHANGELOG. Post-MVP ideas: local-time
 detection windows (everything is UTC today), richer evidence/history UI, action
 conditions.
-The approved MVP plan lives in `~/.opencode/plan/hal1976-mvp.md`; `PLAN.md` is the earlier draft.
+The approved MVP plan lives in `~/.opencode/plan/phil9000-mvp.md`; `PLAN.md` is the earlier draft.
 
-Naming conventions: integration domain `hal1976`, events `hal1976_behaviour_detected`,
-services `hal1976.*` (e.g. `hal1976.confirm_pattern`).
+Naming conventions: integration domain `phil9000`, events `phil9000_behaviour_detected`,
+services `phil9000.*` (e.g. `phil9000.confirm_pattern`).

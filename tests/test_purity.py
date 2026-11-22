@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-PKG = Path(__file__).resolve().parent.parent / "custom_components" / "hal1976"
+PKG = Path(__file__).resolve().parent.parent / "custom_components" / "phil9000"
 
 # Files that must remain HA-free at module level. config_flow.py is the
 # HA-facing surface and is deliberately excluded.

@@ -1,10 +1,10 @@
 /**
- * HAL1976 sidebar panel — lists learned behaviours with confidence and
+ * PHIL9000 sidebar panel — lists learned behaviours with confidence and
  * evidence; confirm / dismiss / reopen and edit a behaviour's actions.
  *
  * Plain JS web component, no build step and no framework. Data flows over
- * the Home Assistant websocket API (hal1976/behaviours, hal1976/set_status,
- * hal1976/set_actions); the panel refreshes on hal1976_behaviour_detected.
+ * the Home Assistant websocket API (phil9000/behaviours, phil9000/set_status,
+ * phil9000/set_actions); the panel refreshes on phil9000_behaviour_detected.
  */
 
 const STATUS_RANK = { confirmed: 0, candidate: 1, dismissed: 2 };
@@ -91,7 +91,7 @@ const STYLE = `
     .empty { color: var(--secondary-text-color); font-size: 14px; }
   </style>`;
 
-class Hal1976Panel extends HTMLElement {
+class Phil9000Panel extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._initialized) return;
@@ -103,14 +103,14 @@ class Hal1976Panel extends HTMLElement {
     this._editing = null; // behaviour_id while its action editor is open
     this._draft = []; // actions being edited (copy of stored actions)
 
-    this.innerHTML = `${STYLE}<header><h1>HAL1976</h1>
+    this.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
       <button class="secondary" data-act="refresh">Refresh</button></header>
       <p class="meta"></p><div id="banner"></div><div id="body"><p class="empty">Loading…</p></div>`;
     this.addEventListener("click", (ev) => this._onClick(ev));
 
     hass.connection.subscribeEvents(
       () => this._refresh(),
-      "hal1976_behaviour_detected",
+      "phil9000_behaviour_detected",
     );
     this._refresh();
   }
@@ -118,7 +118,7 @@ class Hal1976Panel extends HTMLElement {
   async _refresh() {
     try {
       const result = await this._hass.connection.sendMessagePromise({
-        type: "hal1976/behaviours",
+        type: "phil9000/behaviours",
       });
       this._behaviours = result.behaviours;
       this._meta = { path: result.path, observed_entities: result.observed_entities };
@@ -182,7 +182,7 @@ class Hal1976Panel extends HTMLElement {
     }
     this._editing = null;
     await this._send({
-      type: "hal1976/set_actions",
+      type: "phil9000/set_actions",
       behaviour_id: this._saveTarget,
       actions,
     });
@@ -194,9 +194,9 @@ class Hal1976Panel extends HTMLElement {
     const act = btn.dataset.act;
     const id = btn.dataset.id;
     if (act === "refresh") return this._refresh();
-    if (act === "confirm") return this._send({ type: "hal1976/set_status", behaviour_id: id, status: "confirmed" });
-    if (act === "dismiss") return this._send({ type: "hal1976/set_status", behaviour_id: id, status: "dismissed" });
-    if (act === "reopen") return this._send({ type: "hal1976/set_status", behaviour_id: id, status: "candidate" });
+    if (act === "confirm") return this._send({ type: "phil9000/set_status", behaviour_id: id, status: "confirmed" });
+    if (act === "dismiss") return this._send({ type: "phil9000/set_status", behaviour_id: id, status: "dismissed" });
+    if (act === "reopen") return this._send({ type: "phil9000/set_status", behaviour_id: id, status: "candidate" });
     if (act === "edit-actions") {
       const behaviour = this._behaviours.find((b) => b.id === id);
       this._editing = id;
@@ -235,7 +235,7 @@ class Hal1976Panel extends HTMLElement {
     const body = this.querySelector("#body");
     if (!this._behaviours) return;
     if (this._behaviours.length === 0) {
-      body.innerHTML = `<p class="empty">No behaviours learned yet. HAL1976 is observing your
+      body.innerHTML = `<p class="empty">No behaviours learned yet. PHIL9000 is observing your
         entities and will suggest patterns as it notices them. You can also add
         candidate behaviours directly to the YAML file above.</p>`;
       return;
@@ -316,6 +316,6 @@ class Hal1976Panel extends HTMLElement {
   }
 }
 
-if (!customElements.get("hal1976-panel")) {
-  customElements.define("hal1976-panel", Hal1976Panel);
+if (!customElements.get("phil9000-panel")) {
+  customElements.define("phil9000-panel", Phil9000Panel);
 }

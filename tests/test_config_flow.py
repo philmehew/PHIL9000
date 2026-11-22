@@ -7,14 +7,14 @@ from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.hal1976.const import (
+from custom_components.phil9000.const import (
     CONF_ENTITIES,
     DOMAIN,
     OPTION_ANALYSIS_DAYS,
     OPTION_ANALYSIS_ENABLED,
     OPTION_COOLDOWN_DEFAULT,
 )
-from custom_components.hal1976.seed import end_of_work_day
+from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
     KITCHEN,
     OFFICE,
@@ -98,7 +98,7 @@ async def test_options_flow_updates_entities_and_settings(
 
 
 async def test_corrupt_behaviours_yaml_delays_setup(hass: HomeAssistant) -> None:
-    # A behaviour entry missing its required fields must not boot HAL1976
+    # A behaviour entry missing its required fields must not boot PHIL9000
     # "empty" (a later save would destroy the file) — setup is retried.
     behaviours_path(hass).parent.mkdir(parents=True, exist_ok=True)
     behaviours_path(hass).write_text("behaviours:\n  - name: Broken\n")

@@ -170,7 +170,7 @@ def _to_behaviour(item: object) -> Behaviour | None:
         description=str(item.get("description", "")).strip()[:500],
         steps=steps,
         # LLM proposals never carry actions: acting is the user's decision
-        # (confirm via hal1976.confirm_behaviour, actions via the panel/YAML).
+        # (confirm via phil9000.confirm_behaviour, actions via the panel/YAML).
         actions=[],
         weekdays=weekdays,
         time_start=time_start,

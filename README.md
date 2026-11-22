@@ -1,14 +1,14 @@
-# HAL1976
+# PHIL9000
 
 A Home Assistant integration that learns a household's behaviour by deriving patterns from
 sensor data — observe first, ask questions, and (once you confirm) act with pure Python.
 
 Status: **v0.1.0 (MVP) released** — all five functional milestones are done: observed
 events feed the pure detection engine, confirmed behaviours fire
-`hal1976_behaviour_detected` **and execute their service-call actions**, candidates nudge
+`phil9000_behaviour_detected` **and execute their service-call actions**, candidates nudge
 you, a sidebar panel handles review and action editing, and an optional Assist-backed
 analyser proposes new candidates from recorder history (schema-validated, inert until
-confirmed). See `~/.opencode/plan/hal1976-mvp.md` (approved plan); `PLAN.md` is the
+confirmed). See `~/.opencode/plan/phil9000-mvp.md` (approved plan); `PLAN.md` is the
 earlier draft.
 
 ## Layout
@@ -16,7 +16,7 @@ earlier draft.
 Everything ships inside the integration folder, because that is all HACS copies to the
 user's `config/`:
 
-- `custom_components/hal1976/` — the integration.
+- `custom_components/phil9000/` — the integration.
   - Pure core, **no Home Assistant imports** (guarded by `tests/test_purity.py`):
     `models.py`, `detect.py`, `yaml_store.py`, `seed.py`, `const.py`.
   - Thin HA adapter (HA imports are function-local): `__init__.py`, `config_flow.py`,
@@ -29,31 +29,31 @@ user's `config/`:
   using `pytest-homeassistant-custom-component` (dev-only dependency).
 - `main.py` — standalone demo: replays a synthetic evening through the detection engine.
 
-Learned behaviours persist as **YAML** in `<HA config>/hal1976/behaviours.yaml` —
+Learned behaviours persist as **YAML** in `<HA config>/phil9000/behaviours.yaml` —
 user-editable and versionable. Observation data itself stays in HA's recorder.
 
 ## Installing in Home Assistant
 
 1. Add this repository as a HACS custom repository (type: *Integration*), or copy
-   `custom_components/hal1976/` into your HA config directory.
-2. Restart Home Assistant, then add HAL1976 under *Settings → Devices & Services* and
+   `custom_components/phil9000/` into your HA config directory.
+2. Restart Home Assistant, then add PHIL9000 under *Settings → Devices & Services* and
    pick the entities to observe.
 
 ## Using it
 
-- HAL1976 observes the entities you selected and tallies matches. **Candidates never act.**
-- A **HAL1976 sidebar panel** lists learned behaviours with confidence, steps, schedule
+- PHIL9000 observes the entities you selected and tallies matches. **Candidates never act.**
+- A **PHIL9000 sidebar panel** lists learned behaviours with confidence, steps, schedule
   and last-fired evidence, and lets you confirm, dismiss, reopen, and edit each
-  behaviour's actions (talks to the `hal1976/behaviours`, `hal1976/set_status` and
-  `hal1976/set_actions` websocket commands).
+  behaviour's actions (talks to the `phil9000/behaviours`, `phil9000/set_status` and
+  `phil9000/set_actions` websocket commands).
 - When a candidate pattern is first seen you also get a nudge (via the `notify` entity
   from the options, otherwise a persistent notification) with the pattern and its id.
 - You can also confirm or dismiss from *Developer Tools → Actions* (or a script):
-  `hal1976.confirm_behaviour` / `hal1976.dismiss_behaviour` with `behaviour_id`.
-- Confirmed behaviours fire the `hal1976_behaviour_detected` event and execute their
+  `phil9000.confirm_behaviour` / `phil9000.dismiss_behaviour` with `behaviour_id`.
+- Confirmed behaviours fire the `phil9000_behaviour_detected` event and execute their
   actions (HA service calls defined in the YAML) — deterministic Python, no LLM.
 - **Optional pattern discovery**: enable *nightly pattern analysis* in the integration
-  options (off by default) and/or call `hal1976.run_analysis` on demand. HAL1976
+  options (off by default) and/or call `phil9000.run_analysis` on demand. PHIL9000
   summarises the recent recorder history and asks the household's Assist conversation
   agent for recurring patterns. Proposals are schema-validated, arrive as candidates
   with **no actions**, never re-propose known patterns, and nothing executes until you
@@ -88,8 +88,8 @@ behaviours:
     time_end: "19:00:00"
     status: candidate            # candidate | confirmed | dismissed
     cooldown_seconds: 3600       # minimum seconds between firings
-    confidence: 0.0              # managed by HAL1976 (1 - 1/(occurrences+1))
-    occurrences: 0               # managed by HAL1976
+    confidence: 0.0              # managed by PHIL9000 (1 - 1/(occurrences+1))
+    occurrences: 0               # managed by PHIL9000
 ```
 
 ## Gotchas (v0.1.0)
@@ -115,7 +115,7 @@ uv run python main.py  # replay a synthetic evening and watch detection fire
 
 ## Philosophy
 
-- **Observe first.** HAL1976 proposes patterns; it never acts autonomously by default.
+- **Observe first.** PHIL9000 proposes patterns; it never acts autonomously by default.
 - **LLM for discovery, Python for execution.** Pattern *detection* and action execution
   are deterministic Python; the LLM (via Home Assistant Assist) only proposes candidates.
 - **You stay in the loop.** Every learned behaviour can be inspected, corrected, confirmed,

@@ -9,8 +9,8 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant, ServiceCall, State
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.hal1976.const import CONF_ENTITIES, DOMAIN
-from custom_components.hal1976.yaml_store import BehaviourStore
+from custom_components.phil9000.const import CONF_ENTITIES, DOMAIN
+from custom_components.phil9000.yaml_store import BehaviourStore
 
 OFFICE = "binary_sensor.office_presence"
 KITCHEN = "binary_sensor.kitchen_presence"
@@ -22,7 +22,7 @@ ACTION_TARGET = "test.target_entity"
 
 
 def behaviours_path(hass: HomeAssistant) -> Path:
-    return Path(hass.config.path("hal1976", "behaviours.yaml"))
+    return Path(hass.config.path("phil9000", "behaviours.yaml"))
 
 
 def seed_behaviours(hass: HomeAssistant, *behaviours) -> None:

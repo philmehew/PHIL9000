@@ -1,4 +1,4 @@
-"""Websocket API: HAL1976's data surface for the basic frontend (Milestone 4).
+"""Websocket API: PHIL9000's data surface for the basic frontend (Milestone 4).
 
 Commands are registered once per HA run from the integration's async_setup;
 handlers resolve the current runtime from hass.data on every message, so
@@ -22,13 +22,13 @@ from .models import BehaviourAction, BehaviourStatus
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
-    from . import HalRuntime
+    from . import Phil9000Runtime
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def current_runtime(hass: HomeAssistant) -> HalRuntime | None:
-    """The runtime of the (single) loaded HAL1976 config entry, if any."""
+def current_runtime(hass: HomeAssistant) -> Phil9000Runtime | None:
+    """The runtime of the (single) loaded PHIL9000 config entry, if any."""
     for runtime in hass.data.get(DOMAIN, {}).values():
         return runtime
     return None
@@ -41,21 +41,21 @@ def _observed_entities(hass: HomeAssistant) -> list[str]:
 
 
 def async_setup(hass: HomeAssistant) -> None:
-    """Register the hal1976 websocket commands (idempotent per HA run)."""
+    """Register the phil9000 websocket commands (idempotent per HA run)."""
     import voluptuous as vol  # function-local: purity guard
     from homeassistant.components import (  # function-local: purity guard
         websocket_api,
     )
 
     @websocket_api.async_response
-    @websocket_api.websocket_command({"type": "hal1976/behaviours"})
+    @websocket_api.websocket_command({"type": "phil9000/behaviours"})
     async def handle_behaviours(
         hass: HomeAssistant, connection: Any, msg: dict[str, Any]
     ) -> None:
         runtime = current_runtime(hass)
         if runtime is None:
             connection.send_error(
-                msg["id"], websocket_api.ERR_NOT_FOUND, "HAL1976 is not loaded"
+                msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded"
             )
             return
         connection.send_result(
@@ -76,7 +76,7 @@ def async_setup(hass: HomeAssistant) -> None:
     @websocket_api.async_response
     @websocket_api.websocket_command(
         {
-            "type": "hal1976/set_status",
+            "type": "phil9000/set_status",
             vol.Required(ATTR_BEHAVIOUR_ID): str,
             vol.Required("status"): vol.In(
                 [status.value for status in BehaviourStatus]
@@ -89,7 +89,7 @@ def async_setup(hass: HomeAssistant) -> None:
         runtime = current_runtime(hass)
         if runtime is None:
             connection.send_error(
-                msg["id"], websocket_api.ERR_NOT_FOUND, "HAL1976 is not loaded"
+                msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded"
             )
             return
         try:
@@ -104,7 +104,7 @@ def async_setup(hass: HomeAssistant) -> None:
     @websocket_api.async_response
     @websocket_api.websocket_command(
         {
-            "type": "hal1976/set_actions",
+            "type": "phil9000/set_actions",
             vol.Required(ATTR_BEHAVIOUR_ID): str,
             vol.Required("actions"): [
                 vol.Schema(
@@ -124,7 +124,7 @@ def async_setup(hass: HomeAssistant) -> None:
         runtime = current_runtime(hass)
         if runtime is None:
             connection.send_error(
-                msg["id"], websocket_api.ERR_NOT_FOUND, "HAL1976 is not loaded"
+                msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded"
             )
             return
         actions = [

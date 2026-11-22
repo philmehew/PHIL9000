@@ -1,4 +1,4 @@
-"""Config flow for HAL1976: entity selection + options.
+"""Config flow for PHIL9000: entity selection + options.
 
 This module is Home Assistant-facing (only ever imported inside HA).
 """
@@ -33,8 +33,8 @@ from .const import (
 )
 
 
-class Hal1976ConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Initial setup: pick the entities HAL1976 should observe."""
+class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Initial setup: pick the entities PHIL9000 should observe."""
 
     VERSION = 1
 
@@ -50,7 +50,7 @@ class Hal1976ConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(DOMAIN)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title="HAL1976",
+                    title="PHIL9000",
                     data={CONF_ENTITIES: sorted(entities)},
                     options={
                         OPTION_AGENT_ID: None,
@@ -82,10 +82,10 @@ class Hal1976ConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        return Hal1976OptionsFlow()
+        return Phil9000OptionsFlow()
 
 
-class Hal1976OptionsFlow(OptionsFlow):
+class Phil9000OptionsFlow(OptionsFlow):
     """Conversation agent (for the future LLM analyser), notify target, cooldowns."""
 
     async def async_step_init(

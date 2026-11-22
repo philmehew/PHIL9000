@@ -39,4 +39,4 @@ async def async_notify(
                 blocking=True,
             )
     except Exception:  # noqa: BLE001 — a missing notifier must not hide anything
-        _LOGGER.exception("Failed to deliver HAL1976 notification: %s", title)
+        _LOGGER.exception("Failed to deliver PHIL9000 notification: %s", title)

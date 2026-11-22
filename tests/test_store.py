@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.hal1976.models import (
+from custom_components.phil9000.models import (
     Behaviour,
     BehaviourAction,
     BehaviourStatus,
     BehaviourStep,
 )
-from custom_components.hal1976.seed import end_of_work_day
-from custom_components.hal1976.yaml_store import BehaviourStore
+from custom_components.phil9000.seed import end_of_work_day
+from custom_components.phil9000.yaml_store import BehaviourStore
 
 
 def make_behaviour() -> Behaviour:

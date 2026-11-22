@@ -14,17 +14,17 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.hal1976.analysis import (
+from custom_components.phil9000.analysis import (
     AnalysisUnavailableError,
     async_run_analysis,
 )
-from custom_components.hal1976.const import (
+from custom_components.phil9000.const import (
     DOMAIN,
     OPTION_ANALYSIS_ENABLED,
     OPTION_NOTIFY_ENTITY,
     SERVICE_RUN_ANALYSIS,
 )
-from custom_components.hal1976.seed import end_of_work_day
+from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
     KITCHEN,
     OFFICE,

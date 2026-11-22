@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.hal1976.const import EVENT_BEHAVIOUR_DETECTED
-from custom_components.hal1976.models import BehaviourStatus
-from custom_components.hal1976.seed import end_of_work_day
+from custom_components.phil9000.const import EVENT_BEHAVIOUR_DETECTED
+from custom_components.phil9000.models import BehaviourStatus
+from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
     capture_events,
     fire_evening,
@@ -40,7 +40,7 @@ async def test_behaviours_list_confirm_and_evidence(
     client = await hass_ws_client(hass)
 
     # List: the candidate is visible with its steps, not yet confirmed.
-    out = await _send(client, 1, {"type": "hal1976/behaviours"})
+    out = await _send(client, 1, {"type": "phil9000/behaviours"})
     assert out["success"] is True
     assert out["result"]["observed_entities"] == [
         "binary_sensor.office_presence",
@@ -57,7 +57,7 @@ async def test_behaviours_list_confirm_and_evidence(
         client,
         2,
         {
-            "type": "hal1976/set_status",
+            "type": "phil9000/set_status",
             "behaviour_id": "end_of_work_day",
             "status": "confirmed",
         },
@@ -68,7 +68,7 @@ async def test_behaviours_list_confirm_and_evidence(
     await fire_evening(hass, day=25)  # Wednesday
     assert len(detections) == 1
 
-    out = await _send(client, 3, {"type": "hal1976/behaviours"})
+    out = await _send(client, 3, {"type": "phil9000/behaviours"})
     listed = out["result"]["behaviours"][0]
     assert listed["status"] == "confirmed"
     assert listed["occurrences"] == 1
@@ -89,7 +89,7 @@ async def test_set_actions_persists_and_next_detection_uses_them(
         client,
         1,
         {
-            "type": "hal1976/set_actions",
+            "type": "phil9000/set_actions",
             "behaviour_id": "end_of_work_day",
             "actions": [
                 {
@@ -126,7 +126,7 @@ async def test_websocket_error_paths(hass: HomeAssistant, hass_ws_client) -> Non
         client,
         1,
         {
-            "type": "hal1976/set_status",
+            "type": "phil9000/set_status",
             "behaviour_id": "nope",
             "status": "confirmed",
         },
@@ -140,7 +140,7 @@ async def test_websocket_error_paths(hass: HomeAssistant, hass_ws_client) -> Non
         client,
         2,
         {
-            "type": "hal1976/set_status",
+            "type": "phil9000/set_status",
             "behaviour_id": "end_of_work_day",
             "status": "autopilot",
         },

@@ -13,13 +13,13 @@ Initial MVP release.
   actions. Confidence grows with occurrences (`1 - 1/(n+1)`); nothing auto-promotes.
 
 ### Acting
-- Confirmed behaviours fire `hal1976_behaviour_detected` and execute their actions
+- Confirmed behaviours fire `phil9000_behaviour_detected` and execute their actions
   as ordered Home Assistant service calls (failures are isolated and logged).
-- `hal1976.confirm_behaviour` / `hal1976.dismiss_behaviour` services with
+- `phil9000.confirm_behaviour` / `phil9000.dismiss_behaviour` services with
   immediate YAML persistence.
 
 ### Discovery (optional, off by default)
-- `hal1976.run_analysis` and a nightly job summarise recorder history and ask the
+- `phil9000.run_analysis` and a nightly job summarise recorder history and ask the
   household's Assist conversation agent for recurring patterns.
 - Proposals are schema-validated, arrive as action-free candidates, never re-propose
   known or dismissed patterns, and are idempotent across runs.
@@ -27,12 +27,12 @@ Initial MVP release.
 ### Interface
 - Sidebar panel (plain JS, no build step): behaviours with confidence, steps,
   schedule and last-fired evidence; confirm / dismiss / reopen; inline action editor.
-- Websocket commands: `hal1976/behaviours`, `hal1976/set_status`, `hal1976/set_actions`.
+- Websocket commands: `phil9000/behaviours`, `phil9000/set_status`, `phil9000/set_actions`.
 - Config flow for entity selection; options flow for entities, conversation agent,
   notify entity, default cooldown, and analysis settings.
 
 ### Storage & robustness
-- Behaviours persist as user-editable YAML under `<config>/hal1976/behaviours.yaml`
+- Behaviours persist as user-editable YAML under `<config>/phil9000/behaviours.yaml`
   (atomic writes). Corrupt files trigger setup-retry instead of silent data loss.
 - Core domain logic is importable and testable without Home Assistant, enforced by
   a purity guard test.

@@ -1,14 +1,14 @@
-"""Tiny demo: replay a synthetic evening and show HAL1976 detecting a behaviour."""
+"""Tiny demo: replay a synthetic evening and show PHIL9000 detecting a behaviour."""
 
 from datetime import datetime
 
-from custom_components.hal1976 import (
+from custom_components.phil9000 import (
     BehaviourAction,
     BehaviourStatus,
     DetectionEngine,
     Observation,
 )
-from custom_components.hal1976.seed import end_of_work_day
+from custom_components.phil9000.seed import end_of_work_day
 
 
 def main() -> None:

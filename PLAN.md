@@ -1,4 +1,4 @@
-# HAL1976 — MVP Plan
+# PHIL9000 — MVP Plan
 
 ## Goal of the MVP
 
@@ -42,7 +42,7 @@ Home Assistant event bus / state machine
 
 ## Component breakdown (MVP scope)
 
-### 1. Home Assistant integration scaffold — `custom_components/hal1976/`
+### 1. Home Assistant integration scaffold — `custom_components/phil9000/`
 - `manifest.json` (HACS installable), `config_flow.py` (minimal setup), `__init__.py`
   (async setup entry), `const.py`.
 - Config flow asks: which entities to observe (multi-select), and optionally an LLM endpoint/key
@@ -67,7 +67,7 @@ Home Assistant event bus / state machine
 ### 4. Detection engine (pure Python)
 - On each observed event, match against **confirmed** patterns only (candidates never execute).
 - Sequential-step matcher with time gaps and window constraints — deterministic, unit-testable.
-- On match: fire `hal1976_behaviour_detected` event on the HA event bus, then trigger the
+- On match: fire `phil9000_behaviour_detected` event on the HA event bus, then trigger the
   pattern's configured actions.
 - Debounce/dedupe: a confirmed pattern doesn't re-fire within a cooldown period.
 
@@ -86,8 +86,8 @@ Home Assistant event bus / state machine
 ## Repo layout
 
 ```
-custom_components/hal1976/     # HA integration (manifest, config_flow, __init__, storage, event hooks)
-hal1976/                       # installable python package: domain models + engine
+custom_components/phil9000/     # HA integration (manifest, config_flow, __init__, storage, event hooks)
+phil9000/                       # installable python package: domain models + engine
   models.py                    # Pattern, PatternStep, Observation, BehaviourStatus
   store.py                     # observation store (pure, no HA deps)
   detect.py                    # detection engine (pure, no HA deps)
@@ -126,7 +126,7 @@ trivially testable and could later run standalone. The integration is a thin ada
    (OpenAI/Anthropic) in config?
 2. Is a single service-call action enough for MVP, or do you want simple action sequences from
    day one?
-3. Should observation storage use HA's recorder/history (read-only dependency) or HAL1976's own
+3. Should observation storage use HA's recorder/history (read-only dependency) or PHIL9000's own
    event-bus subscription? Plan assumes the latter (self-contained, works without recorder).
 4. Confirmation UX: are persistent notifications + options flow acceptable for MVP, or is a basic
    Lovelace card a must-have earlier?

@@ -1,13 +1,13 @@
 {
-  "domain": "hal1976",
-  "name": "HAL1976",
+  "domain": "phil9000",
+  "name": "PHIL9000",
   "codeowners": ["@philmehew"],
   "config_flow": true,
-  "documentation": "https://github.com/philmehew/HAL1976",
+  "documentation": "https://github.com/philmehew/PHIL9000",
   "integration_type": "hub",
   "iot_class": "local_push",
   "single_config_entry": true,
-  "issue_tracker": "https://github.com/philmehew/HAL1976/issues",
+  "issue_tracker": "https://github.com/philmehew/PHIL9000/issues",
   "requirements": ["pyyaml>=6.0.3"],
   "version": "0.1.0"
 }

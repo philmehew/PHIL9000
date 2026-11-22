@@ -1,7 +1,7 @@
 [project]
-name = "hal1976"
+name = "phil9000"
 version = "0.1.0"
-description = "HAL1976 learns household behaviour by deriving patterns from Home Assistant sensor data"
+description = "PHIL9000 learns household behaviour by deriving patterns from Home Assistant sensor data"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [tool.uv]
-# Not a distributable package: the deliverable is custom_components/hal1976/,
+# Not a distributable package: the deliverable is custom_components/phil9000/,
 # installed into Home Assistant via HACS. Dev happens in-place.
 package = false
 
