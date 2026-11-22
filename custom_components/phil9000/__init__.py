@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,7 @@ from .const import (
     ATTR_STATUS,
     BEHAVIOURS_FILE,
     CONF_ENTITIES,
+    CONF_EXCLUDE_ENTITIES,
     CONFIG_DIR,
     DOMAIN,
     EVENT_BEHAVIOUR_DETECTED,
@@ -47,6 +49,7 @@ from .models import (
     BehaviourStep,
     Observation,
 )
+from .subscriptions import Subscriptions, registry_is_noise
 from .yaml_store import BehaviourStore
 
 __all__ = [
@@ -120,9 +123,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.config_entries import (  # function-local: purity guard
         ConfigEntryNotReady,
     )
-    from homeassistant.helpers.event import (  # function-local: purity guard
-        async_track_state_change_event,
-    )
+    from homeassistant.const import EVENT_STATE_CHANGED  # function-local: purity guard
 
     store = BehaviourStore(hass.config.path(CONFIG_DIR, BEHAVIOURS_FILE))
     try:
@@ -141,8 +142,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime = Phil9000Runtime(engine=engine, store=store)
     hass.data[DOMAIN][entry.entry_id] = runtime
 
-    entities: list[str] = list(entry.data[CONF_ENTITIES])
-    unsub = async_track_state_change_event(hass, entities, _event_handler(hass, entry, runtime))
+    # Whole-domain subscriptions need every state change, so we listen to all
+    # entities and filter through the subscription model (cheap dict/set
+    # lookups) instead of a fixed entity list that would miss new entities.
+    subscriptions = Subscriptions(
+        entry.data[CONF_ENTITIES], entry.data.get(CONF_EXCLUDE_ENTITIES, ())
+    )
+    from homeassistant.helpers.entity_registry import (  # function-local: purity guard
+        async_get as async_get_entity_registry,
+    )
+
+    is_noise = registry_is_noise(async_get_entity_registry(hass))
+    unsub = hass.bus.async_listen(
+        EVENT_STATE_CHANGED, _event_handler(hass, entry, runtime, subscriptions, is_noise)
+    )
     entry.async_on_unload(unsub)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -195,9 +208,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         entry.async_on_unload(hass.bus.async_listen(EVENT_COMPONENT_LOADED, _component_loaded))
 
+    observed = subscriptions.expand(hass.states.async_entity_ids(), is_noise)
     _LOGGER.debug(
-        "PHIL9000 observing %d entities, %d behaviours loaded",
-        len(entities),
+        "PHIL9000 observing %d entities (%d domains), %d behaviours loaded",
+        len(observed),
+        len(subscriptions.domains),
         len(behaviours),
     )
     return True
@@ -311,7 +326,13 @@ async def _execute_actions(hass: HomeAssistant, behaviour: Behaviour) -> None:
 # -- observation → engine → suggestions ----------------------------------
 
 
-def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Runtime):  # noqa: ANN202
+def _event_handler(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    runtime: Phil9000Runtime,
+    subscriptions: Subscriptions,
+    is_noise: Callable[[str], bool],
+):  # noqa: ANN202
     """Translate state_changed events into Observations for the engine."""
     from homeassistant.core import callback  # function-local: purity guard
 
@@ -320,10 +341,13 @@ def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Run
     @callback
     def handle_event(event: Event) -> None:
         new_state = event.data.get("new_state")
+        entity_id = event.data["entity_id"]
         if new_state is None:  # entity removed
             return
+        if not subscriptions.matches(entity_id, is_noise):
+            return
         observation = Observation(
-            entity_id=event.data["entity_id"],
+            entity_id=entity_id,
             new_state=new_state.state,
             old_state=event.data["old_state"].state if event.data.get("old_state") else None,
             timestamp=new_state.last_changed,

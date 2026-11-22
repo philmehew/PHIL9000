@@ -9,6 +9,8 @@ from custom_components.phil9000.const import EVENT_BEHAVIOUR_DETECTED
 from custom_components.phil9000.models import BehaviourStatus
 from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
+    KITCHEN,
+    OFFICE,
     capture_events,
     fire_evening,
     reload_behaviours,
@@ -32,6 +34,9 @@ async def _send(client, msg_id: int, payload: dict) -> dict:
 async def test_behaviours_list_confirm_and_evidence(hass: HomeAssistant, hass_ws_client) -> None:
     behaviour = end_of_work_day(status=BehaviourStatus.CANDIDATE)
     seed_behaviours(hass, behaviour)
+    # The sensor entities exist, so the (exact-id) subscription expands to them.
+    hass.states.async_set(OFFICE, "on")
+    hass.states.async_set(KITCHEN, "off")
     detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
     await setup_entry(hass)
 
@@ -40,10 +45,9 @@ async def test_behaviours_list_confirm_and_evidence(hass: HomeAssistant, hass_ws
     # List: the candidate is visible with its steps, not yet confirmed.
     out = await _send(client, 1, {"type": "phil9000/behaviours"})
     assert out["success"] is True
-    assert out["result"]["observed_entities"] == [
-        "binary_sensor.office_presence",
-        "binary_sensor.kitchen_presence",
-    ]
+    assert out["result"]["observed_entities"] == sorted(
+        [OFFICE, KITCHEN]
+    )  # exact-id subscription expanded
     listed = out["result"]["behaviours"][0]
     assert listed["id"] == "end_of_work_day"
     assert listed["status"] == "candidate"

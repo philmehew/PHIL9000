@@ -3,9 +3,9 @@
     "step": {
       "user": {
         "title": "Set up PHIL9000",
-        "description": "Choose the entities PHIL9000 should observe. It only watches at first — nothing is ever acted on until you confirm a learned behaviour.",
+        "description": "Pick the entity types PHIL9000 should learn from. It only watches at first — nothing is ever acted on until you confirm a learned behaviour. You can add or exclude individual devices later in the integration's options.",
         "data": {
-          "entities": "Entities to observe"
+          "entities": "Entity types to observe"
         }
       }
     },
@@ -13,16 +13,18 @@
       "already_configured": "PHIL9000 is already set up."
     },
     "error": {
-      "no_entities": "Select at least one entity to observe."
+      "no_entities": "Pick at least one entity type to observe."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "PHIL9000 settings",
-        "description": "Settings for pattern analysis and suggestions.",
+        "description": "Settings for what PHIL9000 observes, plus pattern analysis and suggestions.",
         "data": {
-          "entities": "Entities to observe (unchanged if left empty)",
+          "entities": "Entity types to observe",
+          "entity_ids": "Also observe these individual entities",
+          "exclude_entities": "Never observe these entities (even within observed types)",
           "agent_id": "Conversation agent for pattern analysis (blank = default agent)",
           "notify_entity": "Notify entity for suggestions (blank = none)",
           "cooldown_default": "Default cooldown between detections (seconds)",

@@ -12,10 +12,13 @@ from datetime import UTC, datetime
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 
 from custom_components.phil9000.const import (
     ATTR_ACTIONS,
     ATTR_BEHAVIOUR_ID,
+    CONF_ENTITIES,
+    CONF_EXCLUDE_ENTITIES,
     DOMAIN,
     EVENT_BEHAVIOUR_DETECTED,
     OPTION_NOTIFY_ENTITY,
@@ -87,6 +90,54 @@ async def test_events_for_unobserved_entities_ignored(hass: HomeAssistant) -> No
     await hass.async_block_till_done()
 
     assert detections == []
+
+
+async def test_domain_subscription_observes_entities_not_listed(
+    hass: HomeAssistant,
+) -> None:
+    # Subscribing to the binary_sensor domain must cover entities that were
+    # never named in the config — including ones added after setup.
+    seed_behaviours(hass, end_of_work_day())
+    detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+
+    await setup_entry(hass, data={CONF_ENTITIES: ["binary_sensor"]})
+    await fire_evening(hass, day=25)  # Wednesday
+
+    assert len(detections) == 1
+
+
+async def test_excluded_entity_stops_the_sequence(
+    hass: HomeAssistant,
+) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+
+    await setup_entry(
+        hass,
+        data={CONF_ENTITIES: ["binary_sensor"], CONF_EXCLUDE_ENTITIES: [KITCHEN]},
+    )
+    await fire_evening(hass, day=25)
+
+    assert detections == []
+
+
+async def test_hidden_entities_not_observed_via_domain(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+    entity_registry.async_get_or_create(
+        "binary_sensor",
+        "test",
+        "office_presence",
+        suggested_object_id="office_presence",
+        hidden_by=er.RegistryEntryHider.INTEGRATION,
+    )
+
+    await setup_entry(hass, data={CONF_ENTITIES: ["binary_sensor"]})
+    await fire_evening(hass, day=25)
+
+    assert detections == []  # the hidden office sensor breaks the sequence
 
 
 # -- candidate behaviours: nudges, never actions -----------------------------

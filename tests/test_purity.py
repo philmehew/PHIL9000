@@ -26,6 +26,7 @@ PURE_MODULES = [
     "analyser.py",
     "analysis.py",
     "notifier.py",
+    "subscriptions.py",
     "websocket_api.py",
 ]
 

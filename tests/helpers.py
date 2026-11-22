@@ -45,11 +45,15 @@ def capture_events(hass: HomeAssistant, event_type: str) -> list[dict]:
     return events
 
 
-async def setup_entry(hass: HomeAssistant, options: dict | None = None) -> MockConfigEntry:
+async def setup_entry(
+    hass: HomeAssistant,
+    options: dict | None = None,
+    data: dict | None = None,
+) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
         source=SOURCE_USER,
-        data={CONF_ENTITIES: [OFFICE, KITCHEN]},
+        data=data or {CONF_ENTITIES: [OFFICE, KITCHEN]},
         options=options or {},
         unique_id=DOMAIN,
     )

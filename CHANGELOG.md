@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.0 — 2026-11-22
+
+### Observing by entity type
+
+- Setup is now a short checklist of entity *types* (domains) with sensible
+  defaults pre-ticked (binary sensors, device trackers, people, lights,
+  switches) instead of an unworkable entity dropdown.
+
+- Whole-domain subscriptions cover entities added later, and skip hidden,
+  disabled and diagnostic/config entities automatically.
+
+- The integration's options refine a domain subscription per device: *also
+  observe these individual entities* and *never observe these entities*.
+
+- The sidebar panel count and LLM history analysis expand domain
+  subscriptions to the concrete entities observed right now.
+
+- Existing per-entity selections keep working (fully backwards compatible);
+  they appear in the options' individual-entity field.
+
 ## v0.2.0 — 2026-11-22
 
 ### Entity selection

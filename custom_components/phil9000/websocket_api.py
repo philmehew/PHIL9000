@@ -14,10 +14,12 @@ from .const import (
     ATTR_BEHAVIOUR_ID,
     BEHAVIOURS_FILE,
     CONF_ENTITIES,
+    CONF_EXCLUDE_ENTITIES,
     CONFIG_DIR,
     DOMAIN,
 )
 from .models import BehaviourAction, BehaviourStatus
+from .subscriptions import Subscriptions, registry_is_noise
 
 if TYPE_CHECKING:
     from homeassistant.components.websocket_api import ActiveConnection
@@ -36,8 +38,17 @@ def current_runtime(hass: HomeAssistant) -> Phil9000Runtime | None:
 
 
 def _observed_entities(hass: HomeAssistant) -> list[str]:
+    """Concrete entities currently observed (whole-domain specs expanded)."""
+    from homeassistant.helpers.entity_registry import (  # function-local: purity guard
+        async_get as async_get_entity_registry,
+    )
+
+    is_noise = registry_is_noise(async_get_entity_registry(hass))
     for entry in hass.config_entries.async_entries(DOMAIN):
-        return list(entry.data.get(CONF_ENTITIES, []))
+        subscriptions = Subscriptions(
+            entry.data.get(CONF_ENTITIES, []), entry.data.get(CONF_EXCLUDE_ENTITIES, ())
+        )
+        return subscriptions.expand(hass.states.async_entity_ids(), is_noise)
     return []
 
 

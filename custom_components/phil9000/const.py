@@ -14,8 +14,8 @@ SERVICE_CONFIRM_BEHAVIOUR = "confirm_behaviour"
 SERVICE_DISMISS_BEHAVIOUR = "dismiss_behaviour"
 SERVICE_RUN_ANALYSIS = "run_analysis"
 
-# Entity domains worth observing (config-flow picker prefilter). Chosen to
-# cover presence, activity and controllable-device signals while leaving out
+# Entity domains worth observing (config-flow picker). Chosen to cover
+# presence, activity and controllable-device signals while leaving out
 # system/utility domains that would bury the list (update, firmware, sun...).
 OBSERVABLE_DOMAINS = frozenset(
     {
@@ -37,8 +37,37 @@ OBSERVABLE_DOMAINS = frozenset(
     }
 )
 
+# Preselected in the config flow: the signals most households want first.
+DEFAULT_OBSERVABLE_DOMAINS = frozenset(
+    {"binary_sensor", "device_tracker", "light", "person", "switch"}
+)
+
+# Human labels for the domain picker (value -> label).
+OBSERVABLE_DOMAIN_LABELS = {
+    "appliance": "Appliances",
+    "binary_sensor": "Binary sensors (motion, doors, presence)",
+    "climate": "Climate",
+    "cover": "Covers (blinds, garage)",
+    "device_tracker": "Device trackers (phones, tags)",
+    "fan": "Fans",
+    "humidifier": "Humidifiers",
+    "input_boolean": "Helpers (toggles)",
+    "input_select": "Helpers (select boxes)",
+    "light": "Lights",
+    "lock": "Locks",
+    "media_player": "Media players",
+    "person": "People",
+    "sensor": "Sensors (temperature, power, ...)",
+    "switch": "Switches",
+}
+
 # Config entry data
 CONF_ENTITIES = "entities"
+# Entry data: domains and/or entity ids to observe; excluded drops entities
+# from whole-domain subscriptions ("never observe these").
+CONF_EXCLUDE_ENTITIES = "exclude_entities"
+# Config-flow form key: individual entities added alongside domains.
+CONF_ENTITY_IDS = "entity_ids"
 
 # Config entry options
 OPTION_AGENT_ID = "agent_id"

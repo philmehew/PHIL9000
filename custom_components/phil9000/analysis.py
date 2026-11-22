@@ -20,8 +20,9 @@ from .analyser import (
     parse_proposals,
     summarise_history,
 )
-from .const import CONF_ENTITIES, OPTION_AGENT_ID, OPTION_ANALYSIS_DAYS
+from .const import CONF_ENTITIES, CONF_EXCLUDE_ENTITIES, OPTION_AGENT_ID, OPTION_ANALYSIS_DAYS
 from .notifier import async_notify
+from .subscriptions import Subscriptions, registry_is_noise
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -98,6 +99,16 @@ async def async_call_agent(hass: HomeAssistant, agent_id: str | None, prompt: st
     return str(_dig(response, "response", "speech", "plain", "speech") or "")
 
 
+def _expand_specs(hass: HomeAssistant, specs: list[str], exclude: list[str]) -> list[str]:
+    """Resolve domain/entity-id subscriptions to concrete entity ids."""
+    from homeassistant.helpers.entity_registry import (  # function-local: purity guard
+        async_get as async_get_entity_registry,
+    )
+
+    is_noise = registry_is_noise(async_get_entity_registry(hass))
+    return Subscriptions(specs, exclude).expand(hass.states.async_entity_ids(), is_noise)
+
+
 async def async_run_analysis(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -112,9 +123,12 @@ async def async_run_analysis(
     Returns the number of new candidate behaviours added; raises
     AnalysisUnavailableError when the run cannot proceed.
     """
-    entities = list(entry.data.get(CONF_ENTITIES, []))
+    specs = list(entry.data.get(CONF_ENTITIES, []))
+    exclude = list(entry.data.get(CONF_EXCLUDE_ENTITIES, []))
     days = int(entry.options.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS))
-    provider = history_provider or (lambda: async_collect_history(hass, entities, days))
+    provider = history_provider or (
+        lambda: async_collect_history(hass, _expand_specs(hass, specs, exclude), days)
+    )
     call = agent_call or async_call_agent
 
     events_by_entity = await provider()

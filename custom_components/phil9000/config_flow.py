@@ -1,18 +1,19 @@
-"""Config flow for PHIL9000: entity selection + options.
+"""Config flow for PHIL9000: domain subscriptions + options.
 
 This module is Home Assistant-facing (only ever imported inside HA).
+
+Setup asks for entity *domains* (a handful of toggles instead of hundreds of
+entities); the options flow adds per-entity refinement — extra entities to
+observe and entities to never observe within subscribed domains.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
-from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
+from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
@@ -20,13 +21,21 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
 from .analyser import DEFAULT_LOOKBACK_DAYS
 from .const import (
     CONF_ENTITIES,
+    CONF_ENTITY_IDS,
+    CONF_EXCLUDE_ENTITIES,
     DEFAULT_COOLDOWN_DEFAULT,
+    DEFAULT_OBSERVABLE_DOMAINS,
     DOMAIN,
+    OBSERVABLE_DOMAIN_LABELS,
     OBSERVABLE_DOMAINS,
     OPTION_AGENT_ID,
     OPTION_ANALYSIS_DAYS,
@@ -34,52 +43,45 @@ from .const import (
     OPTION_COOLDOWN_DEFAULT,
     OPTION_NOTIFY_ENTITY,
 )
+from .subscriptions import split_specs
 
 
-def _observation_candidates(hass: HomeAssistant, *, extra: Iterable[str] = ()) -> list[str]:
-    """Entity ids worth observing: observable domains minus hidden noise.
-
-    Skips disabled/hidden entities and diagnostic/config ones (firmware
-    sensors, buttons, ...). ``extra`` keeps already-selected ids visible even
-    if they no longer pass the filter.
-    """
-    registry = async_get_entity_registry(hass)
-    candidates = set(extra)
-    for entity_id in hass.states.async_entity_ids():
-        if entity_id.partition(".")[0] not in OBSERVABLE_DOMAINS:
-            continue
-        entry = registry.async_get(entity_id)
-        if entry is not None:
-            if entry.disabled_by is not None or entry.hidden_by is not None:
-                continue
-            if entry.entity_category in (EntityCategory.CONFIG, EntityCategory.DIAGNOSTIC):
-                continue
-        candidates.add(entity_id)
-    return sorted(candidates)
+def _domain_picker() -> SelectSelector:
+    """Checklist of the observable entity domains (a dozen or so options)."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=[
+                SelectOptionDict(value=domain, label=OBSERVABLE_DOMAIN_LABELS.get(domain, domain))
+                for domain in sorted(OBSERVABLE_DOMAINS)
+            ],
+            multiple=True,
+            mode=SelectSelectorMode.LIST,
+        )
+    )
 
 
-def _entity_picker(candidates: list[str]) -> EntitySelector:
-    """Searchable multi-select entity picker."""
-    return EntitySelector(EntitySelectorConfig(include_entities=candidates, multiple=True))
+def _entity_search() -> EntitySelector:
+    """Searchable entity picker over all entities (HA's standard widget)."""
+    return EntitySelector(EntitySelectorConfig(multiple=True))
 
 
 class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Initial setup: pick the entities PHIL9000 should observe."""
+    """Initial setup: pick the entity domains PHIL9000 should observe."""
 
     VERSION = 1
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            entities = user_input.get(CONF_ENTITIES) or []
-            if not entities:
+            domains = user_input.get(CONF_ENTITIES) or []
+            if not domains:
                 errors["base"] = "no_entities"
             else:
                 await self.async_set_unique_id(DOMAIN)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title="PHIL9000",
-                    data={CONF_ENTITIES: sorted(entities)},
+                    data={CONF_ENTITIES: sorted(domains)},
                     options={
                         OPTION_AGENT_ID: None,
                         OPTION_NOTIFY_ENTITY: None,
@@ -89,10 +91,11 @@ class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
                     },
                 )
 
-        candidates = _observation_candidates(self.hass)
         schema = vol.Schema(
             {
-                vol.Required(CONF_ENTITIES): _entity_picker(candidates),
+                vol.Required(
+                    CONF_ENTITIES, default=sorted(DEFAULT_OBSERVABLE_DOMAINS)
+                ): _domain_picker()
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -104,16 +107,25 @@ class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class Phil9000OptionsFlow(OptionsFlow):
-    """Conversation agent (for the future LLM analyser), notify target, cooldowns."""
+    """Observation refinement (domains, extra entities, exclusions) and settings."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             agent_id = (user_input.get(OPTION_AGENT_ID) or "").strip() or None
             notify_entity = (user_input.get(OPTION_NOTIFY_ENTITY) or "").strip() or None
-            entities = sorted(user_input.get(CONF_ENTITIES) or [])
-            if entities:
+            observed = sorted(
+                set(user_input.get(CONF_ENTITIES) or [])
+                | set(user_input.get(CONF_ENTITY_IDS) or [])
+            )
+            excluded = sorted(user_input.get(CONF_EXCLUDE_ENTITIES) or [])
+            if observed:
                 self.hass.config_entries.async_update_entry(
-                    self.config_entry, data={**self.config_entry.data, CONF_ENTITIES: entities}
+                    self.config_entry,
+                    data={
+                        **self.config_entry.data,
+                        CONF_ENTITIES: observed,
+                        CONF_EXCLUDE_ENTITIES: excluded,
+                    },
                 )
             return self.async_create_entry(
                 title="",
@@ -131,15 +143,21 @@ class Phil9000OptionsFlow(OptionsFlow):
             )
 
         current = self.config_entry.options
-        candidates = _observation_candidates(
-            self.hass, extra=self.config_entry.data.get(CONF_ENTITIES, [])
+        current_domains, current_entity_ids = split_specs(
+            self.config_entry.data.get(CONF_ENTITIES, [])
         )
         schema = vol.Schema(
             {
+                vol.Required(CONF_ENTITIES, default=sorted(current_domains)): _domain_picker(),
                 vol.Optional(
-                    CONF_ENTITIES,
-                    default=sorted(self.config_entry.data.get(CONF_ENTITIES, [])),
-                ): _entity_picker(candidates),
+                    CONF_ENTITY_IDS,
+                    default=sorted(current_entity_ids) or vol.UNDEFINED,
+                ): _entity_search(),
+                vol.Optional(
+                    CONF_EXCLUDE_ENTITIES,
+                    default=sorted(self.config_entry.data.get(CONF_EXCLUDE_ENTITIES, []))
+                    or vol.UNDEFINED,
+                ): _entity_search(),
                 # Selector defaults are validated by voluptuous: only supply
                 # one when a value is actually configured, otherwise the key
                 # stays absent (blank = unset).

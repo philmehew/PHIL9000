@@ -5,13 +5,14 @@ from __future__ import annotations
 import pytest
 import voluptuous as vol
 from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import entity_registry as er
 
 from custom_components.phil9000.const import (
     CONF_ENTITIES,
+    CONF_ENTITY_IDS,
+    CONF_EXCLUDE_ENTITIES,
+    DEFAULT_OBSERVABLE_DOMAINS,
     DOMAIN,
     OPTION_ANALYSIS_DAYS,
     OPTION_ANALYSIS_ENABLED,
@@ -29,39 +30,51 @@ from tests.helpers import (
 pytest.importorskip("pytest_homeassistant_custom_component")
 
 
+def _form_default(data_schema: vol.Schema | None, key_name: str) -> object:
+    """The default value a data-schema field was shown with, if any."""
+    assert data_schema is not None
+    for marker in data_schema.schema:
+        if isinstance(marker, vol.Marker) and marker.schema == key_name:
+            default = getattr(marker, "default", vol.UNDEFINED)
+            return default() if callable(default) else default
+    raise AssertionError(f"{key_name!r} is not in the form schema")
+
+
 @pytest.fixture(autouse=True)
 def auto_enable_custom(enable_custom_integrations):  # noqa: ANN001, ARG001
     """Enable custom_components loading for every test in this module."""
 
 
 async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
-    hass.states.async_set(OFFICE, "on")
-    hass.states.async_set(KITCHEN, "off")
-
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
 
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ENTITIES: [KITCHEN, OFFICE]}
+        result["flow_id"], {CONF_ENTITIES: ["binary_sensor", "switch"]}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_ENTITIES] == sorted([OFFICE, KITCHEN])
+    assert result["data"][CONF_ENTITIES] == ["binary_sensor", "switch"]
     assert result["options"][OPTION_ANALYSIS_ENABLED] is False
     assert result["options"][OPTION_COOLDOWN_DEFAULT] == 3600
 
 
-async def test_user_flow_requires_entities_then_recovers(
+async def test_user_flow_preselects_common_domains(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    # A one-click default: presence-ish domains ticked out of the box.
+    assert _form_default(result["data_schema"], CONF_ENTITIES) == sorted(DEFAULT_OBSERVABLE_DOMAINS)
+
+
+async def test_user_flow_requires_domains_then_recovers(
     hass: HomeAssistant,
 ) -> None:
-    hass.states.async_set(OFFICE, "on")
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_ENTITIES: []})
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "no_entities"}
 
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ENTITIES: [OFFICE]}
+        result["flow_id"], {CONF_ENTITIES: ["binary_sensor"]}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
@@ -70,8 +83,6 @@ async def test_options_flow_updates_entities_and_settings(
     hass: HomeAssistant,
 ) -> None:
     seed_behaviours(hass, end_of_work_day())
-    hass.states.async_set(OFFICE, "on")
-    hass.states.async_set(KITCHEN, "off")
     entry = await setup_entry(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -79,7 +90,8 @@ async def test_options_flow_updates_entities_and_settings(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ENTITIES: [KITCHEN],
+            CONF_ENTITIES: ["binary_sensor"],
+            CONF_ENTITY_IDS: [KITCHEN],
             OPTION_COOLDOWN_DEFAULT: 1800,
             OPTION_ANALYSIS_ENABLED: True,
             OPTION_ANALYSIS_DAYS: 14,
@@ -88,60 +100,51 @@ async def test_options_flow_updates_entities_and_settings(
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.data[CONF_ENTITIES] == [KITCHEN]  # data updated, sorted
+    # Domain + extra id merge into one sorted subscription list.
+    assert entry.data[CONF_ENTITIES] == sorted(["binary_sensor", KITCHEN])
     assert entry.options[OPTION_ANALYSIS_ENABLED] is True
     assert entry.options[OPTION_ANALYSIS_DAYS] == 14
     assert entry.options[OPTION_COOLDOWN_DEFAULT] == 1800
 
 
-async def test_user_flow_picker_prefilters_noise(
-    hass: HomeAssistant, entity_registry: er.EntityRegistry
-) -> None:
-    hass.states.async_set(OFFICE, "on")
-    hass.states.async_set("sun.sun", "above_horizon")
-    hass.states.async_set("update.some_addon", "on")
-    diag = entity_registry.async_get_or_create(
-        "sensor", "test", "firmware", entity_category=EntityCategory.DIAGNOSTIC
-    )
-    hidden = entity_registry.async_get_or_create(
-        "binary_sensor", "test", "motion", hidden_by=er.RegistryEntryHider.INTEGRATION
-    )
-    hass.states.async_set(diag.entity_id, "1.0")
-    hass.states.async_set(hidden.entity_id, "off")
-
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
-    assert result["data_schema"] is not None
-    picker = result["data_schema"].schema[vol.Required(CONF_ENTITIES)]
-    included = set(picker.config["include_entities"])
-    assert OFFICE in included
-    assert diag.entity_id not in included  # diagnostic
-    assert hidden.entity_id not in included  # hidden
-    assert "sun.sun" not in included  # non-observable domain
-    assert "update.some_addon" not in included
-
-
-async def test_options_flow_keeps_previously_selected(
+async def test_options_flow_merges_domains_extra_and_excludes(
     hass: HomeAssistant,
 ) -> None:
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
     seed_behaviours(hass, end_of_work_day())
-    # An entity outside the observable domains configured earlier must stay
-    # visible in the picker so the user can review or remove it.
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        source=SOURCE_USER,
-        data={CONF_ENTITIES: ["counter.manual_count"]},
-        unique_id=DOMAIN,
-    )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    entry = await setup_entry(hass, data={CONF_ENTITIES: ["binary_sensor"]})
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["data_schema"] is not None
-    picker = result["data_schema"].schema[vol.Optional(CONF_ENTITIES)]
-    assert "counter.manual_count" in picker.config["include_entities"]
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ENTITIES: ["binary_sensor", "switch"],
+            CONF_ENTITY_IDS: ["light.desk"],
+            CONF_EXCLUDE_ENTITIES: [KITCHEN],
+            OPTION_COOLDOWN_DEFAULT: 3600,
+            OPTION_ANALYSIS_ENABLED: False,
+            OPTION_ANALYSIS_DAYS: 7,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    # Domains and extra ids merge into one sorted subscription list;
+    # exclusions are stored separately.
+    assert entry.data[CONF_ENTITIES] == sorted(["binary_sensor", "switch", "light.desk"])
+    assert entry.data[CONF_EXCLUDE_ENTITIES] == [KITCHEN]
+
+
+async def test_options_flow_keeps_legacy_entity_ids_visible(
+    hass: HomeAssistant,
+) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    # Legacy/v0.1 data: only exact entity ids, no domains.
+    entry = await setup_entry(hass, data={CONF_ENTITIES: [OFFICE, KITCHEN]})
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    # Domains default empty; the exact ids surface in the refinement field.
+    assert _form_default(result["data_schema"], CONF_ENTITIES) == []
+    assert _form_default(result["data_schema"], CONF_ENTITY_IDS) == sorted([OFFICE, KITCHEN])
 
 
 async def test_corrupt_behaviours_yaml_delays_setup(hass: HomeAssistant) -> None:
