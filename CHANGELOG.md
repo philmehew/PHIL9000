@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.0 — 2026-11-22
+
+### Entity selection
+
+- Setup and options now use Home Assistant's searchable entity picker (type to
+  filter, selected entities shown as chips) instead of an unsearchable list of
+  every entity in the system.
+
+- Candidates are prefiltered to observation-worthy domains (presence, activity
+  and controllable-device signals); hidden, disabled and diagnostic/config
+  entities (firmware sensors, config buttons, ...) are left out.
+
+- Entities already selected are always kept visible in the options picker, even
+  if they would no longer pass the filter.
+
 ## v0.1.0 — 2026-11-21
 
 Initial MVP release.
