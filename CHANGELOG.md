@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.4.1 — 2026-11-22
+
+### Mute noisy entities, right from the feed
+
+- **⊘ on every activity row** mutes that entity: it lands in the integration's
+  exclusion list (persisted, also visible in the options flow) and stops being
+  observed immediately — no more feed rows, behaviour steps or LLM digest lines
+  for it. Exactly the "I don't need every voltage change on the heater" case.
+
+- **Monitoring section** in the panel: the watched domains, extra entities and
+  a live count, plus every **muted entity with an Unmute button**. Add or
+  remove whole domains still happens in the integration options.
+
+- Mutes (and any entity-selection change from the options flow) apply **in
+  place**: the config entry is no longer reloaded for data-only changes, so
+  open panels keep their live subscription streaming through a mute. Options
+  changes still reload, since they can alter the nightly analysis schedule.
+
+- New websocket commands: `phil9000/monitoring`, `phil9000/mute_entity`,
+  `phil9000/unmute_entity`; exclusion ids are validated by a pure
+  `is_valid_entity_id` helper; `phil9000/behaviours` and `phil9000/activity`
+  now read the runtime's live subscription model.
+
 ## v0.4.0 — 2026-11-22
 
 ### See what PHIL9000 sees, and refine until accepted

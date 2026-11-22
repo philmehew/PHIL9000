@@ -54,6 +54,14 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   `phil9000/run_analysis`, `phil9000/set_status`, `phil9000/set_name`,
   `phil9000/set_actions`).
 
+- **Noisy entity? Mute it.** Every activity row has a ⊘ button: the entity is added to
+  the integration's exclusion list (persisted, visible in the options flow), stops being
+  observed immediately — no feed rows, no behaviour steps, no LLM digest lines — and the
+  change applies *in place*, without a config-entry reload, so the live feed keeps
+  streaming. The panel's **Monitoring** section lists the watched domains, extra
+  entities and every muted entity, each with an **Unmute** button to revert
+  (`phil9000/monitoring`, `phil9000/mute_entity`, `phil9000/unmute_entity`).
+
 - When a candidate pattern is first seen you also get a nudge (via the `notify` entity
   from the options, otherwise a persistent notification) with the pattern and its id.
 

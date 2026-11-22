@@ -289,3 +289,27 @@ async def test_activity_subscribers_receive_live_rows(hass: HomeAssistant) -> No
         (KITCHEN, "on"),
     ]
     assert rows[0]["old_state"] == "on"
+
+
+async def test_subscription_changes_apply_in_place_without_reload(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())  # CONFIRMED
+    detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    subs_before = runtime.subscriptions
+
+    # A data-only change (what the panel's mute button does): the listener
+    # swaps Subscriptions on the live runtime instead of reloading the entry.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_EXCLUDE_ENTITIES: [OFFICE]}
+    )
+    await hass.async_block_till_done()
+
+    assert hass.data[DOMAIN][entry.entry_id] is runtime  # not reloaded
+    assert runtime.subscriptions is not subs_before
+    assert not runtime.subscriptions.matches(OFFICE)
+    assert runtime.subscriptions.matches(KITCHEN)
+
+    # The swap is effective immediately: the muted entity stops being observed.
+    await fire_evening(hass, day=25)
+    assert detections == []

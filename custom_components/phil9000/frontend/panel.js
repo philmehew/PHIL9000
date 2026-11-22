@@ -6,7 +6,8 @@
  * Plain JS web component, no build step and no framework. Data flows over
  * the Home Assistant websocket API (phil9000/behaviours, phil9000/activity,
  * phil9000/subscribe_activity, phil9000/run_analysis, phil9000/set_status,
- * phil9000/set_name, phil9000/set_actions); the panel refreshes on
+ * phil9000/set_name, phil9000/set_actions, phil9000/monitoring,
+ * phil9000/mute_entity, phil9000/unmute_entity); the panel refreshes on
  * phil9000_behaviour_detected.
  */
 
@@ -111,6 +112,17 @@ const STYLE = `
                 flex: 0 0 86px; }
     .act-entity { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
     .act-change { color: var(--secondary-text-color); }
+    .mute-btn { flex: 0 0 auto; margin-left: auto; padding: 0 9px; font-size: 13px;
+                line-height: 1.5; opacity: .65; }
+    .mute-btn:hover { opacity: 1; }
+    .chip { display: inline-block; background: var(--secondary-background-color);
+            border: 1px solid var(--divider-color); border-radius: 6px;
+            padding: 1px 7px; margin: 1px 2px; font-size: 12px;
+            font-family: monospace; }
+    .muted-row { display: flex; gap: 10px; align-items: center;
+                 border-bottom: 1px solid var(--divider-color); padding: 4px 0; }
+    .muted-row:last-child { border-bottom: none; }
+    .muted-row button { margin-left: auto; font-size: 12px; padding: 3px 10px; }
     .name-input { font-size: 16px; padding: 4px 8px; width: 300px; max-width: 70%;
                   border: 1px solid var(--divider-color); border-radius: 6px;
                   background: var(--card-background-color);
@@ -134,12 +146,14 @@ class Phil9000Panel extends HTMLElement {
     this._activityHint = "";
     this._analysing = false;
     this._analysisNote = null;
+    this._monitoring = null;
 
     this.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
       <button data-act="analyse" ${this._analysing ? "disabled" : ""}>Analyse now</button>
       <button class="secondary" data-act="refresh">Refresh</button></header>
       <p class="meta"></p><div id="banner"></div>
       <h2 class="section">Recent activity</h2><div id="activity"><p class="empty">Loading…</p></div>
+      <h2 class="section">Monitoring</h2><div id="monitoring"></div>
       <h2 class="section">Behaviours</h2><div id="body"><p class="empty">Loading…</p></div>`;
     this.addEventListener("click", (ev) => this._onClick(ev));
     this.addEventListener("keydown", (ev) => {
@@ -167,6 +181,7 @@ class Phil9000Panel extends HTMLElement {
     ).catch(() => {});
     this._refresh();
     this._reloadActivity();
+    this._loadMonitoring();
   }
 
   async _reloadActivity() {
@@ -199,9 +214,84 @@ class Phil9000Panel extends HTMLElement {
           <span class="act-time">${esc(formatClock(row.at))}</span>
           <span class="act-entity">${esc(row.entity_id)}</span>
           <span class="act-change">${esc(row.old_state ?? "—")} → <b>${esc(row.new_state)}</b></span>
+          <button class="secondary mute-btn" data-act="mute" data-entity="${esc(row.entity_id)}"
+            title="Mute ${esc(row.entity_id)} — stop observing it (revert in Monitoring below)">⊘</button>
         </li>`,
       )
       .join("")}</ul></div>`;
+  }
+
+  async _loadMonitoring() {
+    try {
+      this._monitoring = await this._hass.connection.sendMessagePromise({
+        type: "phil9000/monitoring",
+      });
+    } catch (err) {
+      this._error = err.message || String(err);
+      this._monitoring = null;
+      this._render();
+    }
+    this._renderMonitoring();
+  }
+
+  _renderMonitoring() {
+    const el = this.querySelector("#monitoring");
+    if (!el) return;
+    const m = this._monitoring;
+    if (!m) {
+      el.innerHTML = "";
+      return;
+    }
+    const chips = (items) => items.map((v) => `<code class="chip">${esc(v)}</code>`).join("");
+    const muted = m.muted || [];
+    el.innerHTML = `<div class="card">
+      <div class="lines">Domains: ${(m.domains || []).length ? chips(m.domains) : "none"}</div>
+      ${(m.entities || []).length ? `<div class="lines">Extra entities: ${chips(m.entities)}</div>` : ""}
+      <div class="lines">Observing ${(m.observed || []).length} entities right now. Add or remove
+        domains in the integration options (Settings → Integrations → PHIL9000 → Configure).</div>
+      <div class="lines">Muted (${muted.length})${muted.length ? " — no observations, feed rows or analysis:" : ""}</div>
+      ${
+        muted.length
+          ? muted
+              .map(
+                (e) => `<div class="muted-row"><span class="act-entity">${esc(e)}</span>
+                <button class="secondary" data-act="unmute" data-entity="${esc(e)}" ${this._busy ? "disabled" : ""}>Unmute</button>
+              </div>`,
+              )
+              .join("")
+          : `<div class="lines">Nothing muted. Use ⊘ on an activity row to silence a noisy entity.</div>`
+      }
+    </div>`;
+  }
+
+  async _mute(entityId) {
+    try {
+      await this._hass.connection.sendMessagePromise({
+        type: "phil9000/mute_entity",
+        entity_id: entityId,
+      });
+      // The backend stops observing it immediately; clear its rows too.
+      this._activity = this._activity.filter((r) => r.entity_id !== entityId);
+      this._renderActivity();
+    } catch (err) {
+      this._error = err.message || String(err);
+      this._render();
+    }
+    this._loadMonitoring();
+  }
+
+  async _unmute(entityId) {
+    try {
+      await this._hass.connection.sendMessagePromise({
+        type: "phil9000/unmute_entity",
+        entity_id: entityId,
+      });
+    } catch (err) {
+      this._error = err.message || String(err);
+      this._render();
+    }
+    this._loadMonitoring();
+    this._reloadActivity();
   }
 
   async _analyse() {
@@ -306,9 +396,12 @@ class Phil9000Panel extends HTMLElement {
     const id = btn.dataset.id;
     if (act === "refresh") {
       this._refresh();
+      this._loadMonitoring();
       return this._reloadActivity();
     }
     if (act === "analyse") return this._analyse();
+    if (act === "mute") return this._mute(btn.dataset.entity);
+    if (act === "unmute") return this._unmute(btn.dataset.entity);
     if (act === "rename") {
       this._renaming = id;
       return this._render();

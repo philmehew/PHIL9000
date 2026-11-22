@@ -4,9 +4,20 @@ from __future__ import annotations
 
 from custom_components.phil9000.subscriptions import (
     Subscriptions,
+    is_valid_entity_id,
     registry_is_noise,
     split_specs,
 )
+
+
+def test_is_valid_entity_id() -> None:
+    assert is_valid_entity_id("binary_sensor.office_presence")
+    assert is_valid_entity_id("light.desk")
+    assert not is_valid_entity_id("binary_sensor")  # a domain spec, not an entity
+    assert not is_valid_entity_id("not an id")
+    assert not is_valid_entity_id("Binary_Sensor.Desk")
+    assert not is_valid_entity_id("")
+    assert not is_valid_entity_id(".orphan")
 
 
 class _FakeEntry:

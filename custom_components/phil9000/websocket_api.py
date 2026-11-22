@@ -15,13 +15,12 @@ from .activity import DEFAULT_LIMIT
 from .const import (
     ATTR_BEHAVIOUR_ID,
     BEHAVIOURS_FILE,
-    CONF_ENTITIES,
     CONF_EXCLUDE_ENTITIES,
     CONFIG_DIR,
     DOMAIN,
 )
 from .models import BehaviourAction, BehaviourStatus
-from .subscriptions import Subscriptions, registry_is_noise
+from .subscriptions import is_valid_entity_id
 
 if TYPE_CHECKING:
     from homeassistant.components.websocket_api import ActiveConnection
@@ -41,17 +40,10 @@ def current_runtime(hass: HomeAssistant) -> Phil9000Runtime | None:
 
 def _observed_entities(hass: HomeAssistant) -> list[str]:
     """Concrete entities currently observed (whole-domain specs expanded)."""
-    from homeassistant.helpers.entity_registry import (  # function-local: purity guard
-        async_get as async_get_entity_registry,
-    )
-
-    is_noise = registry_is_noise(async_get_entity_registry(hass))
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        subscriptions = Subscriptions(
-            entry.data.get(CONF_ENTITIES, []), entry.data.get(CONF_EXCLUDE_ENTITIES, ())
-        )
-        return subscriptions.expand(hass.states.async_entity_ids(), is_noise)
-    return []
+    runtime = current_runtime(hass)
+    if runtime is None:
+        return []
+    return runtime.subscriptions.expand(hass.states.async_entity_ids(), runtime.is_noise)
 
 
 def _entry(hass: HomeAssistant):  # noqa: ANN202 — ConfigEntry (HA type, purity guard)
@@ -240,6 +232,80 @@ def async_setup(hass: HomeAssistant) -> None:
             return
         connection.send_result(msg["id"])
 
+    @websocket_api.websocket_command({"type": "phil9000/monitoring"})
+    @websocket_api.async_response
+    async def handle_monitoring(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """What the entry observes: domain specs, extra entities, mutes."""
+        runtime = current_runtime(hass)
+        if runtime is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        subscriptions = runtime.subscriptions
+        connection.send_result(
+            msg["id"],
+            {
+                "domains": sorted(subscriptions.domains),
+                "entities": sorted(subscriptions.entity_ids),
+                "muted": sorted(subscriptions.excluded),
+                "observed": _observed_entities(hass),
+            },
+        )
+
+    @websocket_api.websocket_command(
+        {"type": "phil9000/mute_entity", vol.Required("entity_id"): str}
+    )
+    @websocket_api.async_response
+    async def handle_mute_entity(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Stop observing an entity (persisted in the entry's exclude list).
+
+        The update listener swaps the runtime subscriptions in place, so the
+        mute applies to the next state change and live panel feeds keep
+        working — no entry reload.
+        """
+        await _async_set_mute(hass, connection, msg, mute=True)
+
+    @websocket_api.websocket_command(
+        {"type": "phil9000/unmute_entity", vol.Required("entity_id"): str}
+    )
+    @websocket_api.async_response
+    async def handle_unmute_entity(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Resume observing a previously muted entity."""
+        await _async_set_mute(hass, connection, msg, mute=False)
+
+    async def _async_set_mute(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any], *, mute: bool
+    ) -> None:
+        runtime = current_runtime(hass)
+        entry = _entry(hass)
+        if runtime is None or entry is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        entity_id = msg["entity_id"].strip().lower()
+        if not is_valid_entity_id(entity_id):
+            connection.send_error(
+                msg["id"], websocket_api.ERR_INVALID_FORMAT, f"{entity_id!r} is not an entity id"
+            )
+            return
+        excluded = set(entry.data.get(CONF_EXCLUDE_ENTITIES, ()))
+        if mute:
+            excluded.add(entity_id)
+        else:
+            excluded.discard(entity_id)
+        if excluded != set(entry.data.get(CONF_EXCLUDE_ENTITIES, ())):
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_EXCLUDE_ENTITIES: sorted(excluded)}
+            )
+            # Let the update listener swap the subscriptions before we answer,
+            # so the very next event already honours the change.
+            await hass.async_block_till_done()
+        connection.send_result(msg["id"], {"muted": sorted(excluded)})
+
     for handler in (
         handle_behaviours,
         handle_set_status,
@@ -248,5 +314,8 @@ def async_setup(hass: HomeAssistant) -> None:
         handle_subscribe_activity,
         handle_run_analysis,
         handle_set_name,
+        handle_monitoring,
+        handle_mute_entity,
+        handle_unmute_entity,
     ):
         websocket_api.async_register_command(hass, handler)

@@ -76,6 +76,11 @@ class Phil9000Runtime:
 
     engine: DetectionEngine
     store: BehaviourStore
+    subscriptions: Subscriptions
+    is_noise: Callable[[str], bool]
+    # Snapshot of entry.options at setup/reload; the update listener only
+    # reloads when options actually change (entity selection swaps in place).
+    options_snapshot: dict = field(default_factory=dict)
     # Candidate ids already nudged to the user this session (one nudge per
     # candidate per run; a fresh HA start allows a fresh nudge).
     suggested: set[str] = field(default_factory=set)
@@ -152,12 +157,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(f"{store.path} is invalid: {type(err).__name__}: {err}") from err
 
     engine = DetectionEngine(behaviours, on_detect=_detection_callback(hass))
-    runtime = Phil9000Runtime(engine=engine, store=store)
-    hass.data[DOMAIN][entry.entry_id] = runtime
 
     # Whole-domain subscriptions need every state change, so we listen to all
     # entities and filter through the subscription model (cheap dict/set
     # lookups) instead of a fixed entity list that would miss new entities.
+    # The model lives on the runtime so mutes can swap it without a reload.
     subscriptions = Subscriptions(
         entry.data[CONF_ENTITIES], entry.data.get(CONF_EXCLUDE_ENTITIES, ())
     )
@@ -166,9 +170,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     is_noise = registry_is_noise(async_get_entity_registry(hass))
-    unsub = hass.bus.async_listen(
-        EVENT_STATE_CHANGED, _event_handler(hass, entry, runtime, subscriptions, is_noise)
+    runtime = Phil9000Runtime(
+        engine=engine,
+        store=store,
+        subscriptions=subscriptions,
+        is_noise=is_noise,
+        options_snapshot=dict(entry.options),
     )
+    hass.data[DOMAIN][entry.entry_id] = runtime
+
+    unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, _event_handler(hass, entry, runtime))
     entry.async_on_unload(unsub)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -277,7 +288,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Entity selection or options changed: reload so subscriptions match."""
+    """Pick up config changes with as little disruption as possible.
+
+    Entity selection (domains, explicit ids, mutes) lives entirely in the
+    runtime's Subscriptions object, so data-only changes are swapped in
+    place: no reload, live panel subscriptions keep streaming, and a mute
+    takes effect on the next event. Options changes can alter the nightly
+    analysis schedule, so those still reload the entry.
+    """
+    runtime: Phil9000Runtime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if runtime is not None and dict(entry.options) == runtime.options_snapshot:
+        runtime.subscriptions = Subscriptions(
+            entry.data.get(CONF_ENTITIES, []), entry.data.get(CONF_EXCLUDE_ENTITIES, ())
+        )
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -343,8 +367,6 @@ def _event_handler(
     hass: HomeAssistant,
     entry: ConfigEntry,
     runtime: Phil9000Runtime,
-    subscriptions: Subscriptions,
-    is_noise: Callable[[str], bool],
 ):  # noqa: ANN202
     """Translate state_changed events into Observations for the engine."""
     from homeassistant.core import callback  # function-local: purity guard
@@ -362,7 +384,7 @@ def _event_handler(
             # Attribute-only change: never matches a step, and it would flood
             # the activity feed (chatty sensors update attributes constantly).
             return
-        if not subscriptions.matches(entity_id, is_noise):
+        if not runtime.subscriptions.matches(entity_id, runtime.is_noise):
             return
         observation = Observation(
             entity_id=entity_id,

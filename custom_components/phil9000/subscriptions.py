@@ -13,6 +13,7 @@ config) — the predicate is injected so this module stays Home Assistant-free;
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -22,6 +23,17 @@ from typing import Any
 NOISE_ENTITY_CATEGORIES = frozenset({"config", "diagnostic"})
 
 _NO_ENTITY_IS_NOISE: Callable[[str], bool] = lambda entity_id: False  # noqa: E731
+
+_ENTITY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_]+$")
+
+
+def is_valid_entity_id(entity_id: str) -> bool:
+    """Whether the string is a well-formed ``domain.object`` entity id.
+
+    Exclusions (mutes) must name a concrete entity — bare domains are
+    subscription specs, never exclusion entries.
+    """
+    return bool(_ENTITY_ID_RE.match(entity_id))
 
 
 def split_specs(specs: Iterable[str]) -> tuple[set[str], set[str]]:

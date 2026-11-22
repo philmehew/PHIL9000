@@ -8,7 +8,12 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.phil9000 import analysis
-from custom_components.phil9000.const import EVENT_BEHAVIOUR_DETECTED
+from custom_components.phil9000.const import (
+    CONF_ENTITIES,
+    CONF_EXCLUDE_ENTITIES,
+    DOMAIN,
+    EVENT_BEHAVIOUR_DETECTED,
+)
 from custom_components.phil9000.models import BehaviourStatus
 from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
@@ -274,3 +279,90 @@ async def test_set_name_persists_and_flags_custom_name(hass: HomeAssistant, hass
     out = await _send(client, 2, {"type": "phil9000/set_name", "behaviour_id": "nope", "name": "X"})
     assert out["success"] is False
     assert out["error"]["code"] == "not_found"
+
+
+# -- monitoring and mutes ------------------------------------------------------
+
+
+async def test_monitoring_reports_specs_and_mutes(hass: HomeAssistant, hass_ws_client) -> None:
+    await setup_entry(
+        hass,
+        data={
+            CONF_ENTITIES: ["binary_sensor", "light.desk"],
+            CONF_EXCLUDE_ENTITIES: [KITCHEN],
+        },
+    )
+    client = await hass_ws_client(hass)
+
+    out = await _send(client, 1, {"type": "phil9000/monitoring"})
+    assert out["success"] is True
+    result = out["result"]
+    assert result["domains"] == ["binary_sensor"]
+    assert result["entities"] == ["light.desk"]
+    assert result["muted"] == [KITCHEN]
+    assert isinstance(result["observed"], list)
+
+
+async def test_mute_entity_persists_and_stops_live_rows(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    client = await hass_ws_client(hass)
+
+    await client.send_json({"id": 7, "type": "phil9000/subscribe_activity"})
+    assert (await client.receive_json())["success"] is True
+
+    out = await _send(client, 8, {"type": "phil9000/mute_entity", "entity_id": OFFICE})
+    assert out["success"] is True, out
+    assert out["result"] == {"muted": [OFFICE]}
+    # Persisted on the entry, applied in place — same runtime, no reload.
+    assert entry.data[CONF_EXCLUDE_ENTITIES] == [OFFICE]
+    assert hass.data[DOMAIN][entry.entry_id] is runtime
+
+    # The live subscription keeps working; only the office rows are gone.
+    await fire_evening(hass, day=25)
+    push = await client.receive_json()
+    assert push["id"] == 7 and push["type"] == "event"
+    assert push["event"]["entity_id"] == KITCHEN
+    assert reload_behaviours(hass)[0].occurrences == 0  # half a sequence: no match
+
+    # Muting twice is a no-op with the same answer.
+    out = await _send(client, 9, {"type": "phil9000/mute_entity", "entity_id": OFFICE})
+    assert out["success"] is True
+    assert out["result"] == {"muted": [OFFICE]}
+    assert entry.data[CONF_EXCLUDE_ENTITIES] == [OFFICE]
+
+
+async def test_unmute_entity_restores_live_rows(hass: HomeAssistant, hass_ws_client) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(
+        hass, data={CONF_ENTITIES: [OFFICE, KITCHEN], CONF_EXCLUDE_ENTITIES: [OFFICE]}
+    )
+    client = await hass_ws_client(hass)
+
+    await client.send_json({"id": 7, "type": "phil9000/subscribe_activity"})
+    assert (await client.receive_json())["success"] is True
+
+    await fire_evening(hass, day=25)  # office muted: kitchen only
+    assert (await client.receive_json())["event"]["entity_id"] == KITCHEN
+
+    out = await _send(client, 8, {"type": "phil9000/unmute_entity", "entity_id": OFFICE})
+    assert out["success"] is True
+    assert out["result"] == {"muted": []}
+    assert CONF_EXCLUDE_ENTITIES not in entry.data or not entry.data[CONF_EXCLUDE_ENTITIES]
+
+    await fire_evening(hass, day=26)  # both steps now observed: both rows
+    assert (await client.receive_json())["event"]["entity_id"] == OFFICE
+    assert (await client.receive_json())["event"]["entity_id"] == KITCHEN
+    assert reload_behaviours(hass)[0].occurrences == 1
+
+
+async def test_mute_rejects_invalid_entity_id(hass: HomeAssistant, hass_ws_client) -> None:
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    out = await _send(client, 1, {"type": "phil9000/mute_entity", "entity_id": "not an id"})
+    assert out["success"] is False
+    assert out["error"]["code"] == "invalid_format"
