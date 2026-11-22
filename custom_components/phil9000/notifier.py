@@ -14,9 +14,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_notify(
-    hass: HomeAssistant, entry: ConfigEntry, title: str, message: str
-) -> None:
+async def async_notify(hass: HomeAssistant, entry: ConfigEntry, title: str, message: str) -> None:
     """Send via the configured notify entity, else a persistent notification.
 
     Never raises: notification failures must not hide detections or results.

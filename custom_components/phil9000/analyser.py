@@ -83,8 +83,7 @@ def build_prompt(summary: str, existing: list[Behaviour]) -> str:
     """Prompt for the conversation agent, steering it away from known patterns."""
     if existing:
         known = "\n".join(
-            f"- {b.name} [{b.status.value}]: {b.description or 'no description'}"
-            for b in existing
+            f"- {b.name} [{b.status.value}]: {b.description or 'no description'}" for b in existing
         )
     else:
         known = "- none"
@@ -94,9 +93,7 @@ def build_prompt(summary: str, existing: list[Behaviour]) -> str:
 # -- proposal validation ---------------------------------------------------------
 
 
-def _signature(
-    steps: list[BehaviourStep], weekdays: set[int], time_start, time_end
-) -> str:
+def _signature(steps: list[BehaviourStep], weekdays: set[int], time_start, time_end) -> str:
     parts = (
         ";".join(f"{s.entity_id}={s.to_state}" for s in steps),
         ",".join(str(d) for d in sorted(weekdays)),
@@ -107,9 +104,7 @@ def _signature(
 
 
 def behaviour_signature(behaviour: Behaviour) -> str:
-    return _signature(
-        behaviour.steps, behaviour.weekdays, behaviour.time_start, behaviour.time_end
-    )
+    return _signature(behaviour.steps, behaviour.weekdays, behaviour.time_start, behaviour.time_end)
 
 
 def _parse_hhmm(value: object) -> time | None:
@@ -142,9 +137,7 @@ def _to_behaviour(item: object) -> Behaviour | None:
             gap = int(step_raw.get("max_gap_seconds", 300))
         except (TypeError, ValueError):
             gap = 300
-        steps.append(
-            BehaviourStep(entity_id, to_state, max(5, min(gap, 24 * 3600)))
-        )
+        steps.append(BehaviourStep(entity_id, to_state, max(5, min(gap, 24 * 3600))))
 
     weekdays: set[int] = set()
     raw_days = item.get("weekdays")
@@ -194,9 +187,7 @@ def _extract_json(text: str):
         return None
 
 
-def parse_proposals(
-    text: str, existing: list[Behaviour] | None = None
-) -> list[Behaviour]:
+def parse_proposals(text: str, existing: list[Behaviour] | None = None) -> list[Behaviour]:
     """Turn an LLM reply into validated candidate behaviours.
 
     Invalid replies yield []; individual malformed proposals are dropped.

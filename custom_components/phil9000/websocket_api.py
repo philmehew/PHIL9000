@@ -20,6 +20,7 @@ from .const import (
 from .models import BehaviourAction, BehaviourStatus
 
 if TYPE_CHECKING:
+    from homeassistant.components.websocket_api import ActiveConnection
     from homeassistant.core import HomeAssistant
 
     from . import Phil9000Runtime
@@ -47,16 +48,14 @@ def async_setup(hass: HomeAssistant) -> None:
         websocket_api,
     )
 
-    @websocket_api.async_response
     @websocket_api.websocket_command({"type": "phil9000/behaviours"})
+    @websocket_api.async_response
     async def handle_behaviours(
-        hass: HomeAssistant, connection: Any, msg: dict[str, Any]
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
         runtime = current_runtime(hass)
         if runtime is None:
-            connection.send_error(
-                msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded"
-            )
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
             return
         connection.send_result(
             msg["id"],
@@ -73,24 +72,20 @@ def async_setup(hass: HomeAssistant) -> None:
             },
         )
 
-    @websocket_api.async_response
     @websocket_api.websocket_command(
         {
             "type": "phil9000/set_status",
             vol.Required(ATTR_BEHAVIOUR_ID): str,
-            vol.Required("status"): vol.In(
-                [status.value for status in BehaviourStatus]
-            ),
+            vol.Required("status"): vol.In([status.value for status in BehaviourStatus]),
         }
     )
+    @websocket_api.async_response
     async def handle_set_status(
-        hass: HomeAssistant, connection: Any, msg: dict[str, Any]
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
         runtime = current_runtime(hass)
         if runtime is None:
-            connection.send_error(
-                msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded"
-            )
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
             return
         try:
             await runtime.async_set_status(
@@ -101,7 +96,6 @@ def async_setup(hass: HomeAssistant) -> None:
             return
         connection.send_result(msg["id"])
 
-    @websocket_api.async_response
     @websocket_api.websocket_command(
         {
             "type": "phil9000/set_actions",
@@ -118,14 +112,13 @@ def async_setup(hass: HomeAssistant) -> None:
             ],
         }
     )
+    @websocket_api.async_response
     async def handle_set_actions(
-        hass: HomeAssistant, connection: Any, msg: dict[str, Any]
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
         runtime = current_runtime(hass)
         if runtime is None:
-            connection.send_error(
-                msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded"
-            )
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
             return
         actions = [
             BehaviourAction(

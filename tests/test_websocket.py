@@ -29,9 +29,7 @@ async def _send(client, msg_id: int, payload: dict) -> dict:
     return await client.receive_json()
 
 
-async def test_behaviours_list_confirm_and_evidence(
-    hass: HomeAssistant, hass_ws_client
-) -> None:
+async def test_behaviours_list_confirm_and_evidence(hass: HomeAssistant, hass_ws_client) -> None:
     behaviour = end_of_work_day(status=BehaviourStatus.CANDIDATE)
     seed_behaviours(hass, behaviour)
     detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)

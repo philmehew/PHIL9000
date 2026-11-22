@@ -60,31 +60,33 @@ async def _fake_history():
     }
 
 
-async def _fake_agent(hass, agent_id, prompt):
-    _fake_agent.calls.append((agent_id, prompt))
-    return LLM_REPLY
+class FakeAgent:
+    """Conversation-agent double that records (agent_id, prompt) calls."""
 
+    def __init__(self, reply: str = LLM_REPLY) -> None:
+        self.reply = reply
+        self.calls: list[tuple[str | None, str]] = []
 
-_fake_agent.calls: list = []
+    async def __call__(self, hass, agent_id, prompt):  # noqa: ANN001
+        self.calls.append((agent_id, prompt))
+        return self.reply
 
 
 async def test_run_analysis_adds_and_persists_candidates(hass: HomeAssistant) -> None:
     seed_behaviours(hass, end_of_work_day())
     notifies = capture_calls(hass, "notify", "send_message")
-    entry = await setup_entry(
-        hass, options={OPTION_NOTIFY_ENTITY: "notify.mobile_phone"}
-    )
+    entry = await setup_entry(hass, options={OPTION_NOTIFY_ENTITY: "notify.mobile_phone"})
     runtime = hass.data[DOMAIN][entry.entry_id]
-    _fake_agent.calls.clear()
+    agent = FakeAgent()
 
     added = await async_run_analysis(
-        hass, entry, runtime, history_provider=_fake_history, agent_call=_fake_agent
+        hass, entry, runtime, history_provider=_fake_history, agent_call=agent
     )
     await hass.async_block_till_done()
 
     assert added == 1
-    assert _fake_agent.calls[0][0] is None  # no agent configured -> default
-    assert "binary_sensor.office_presence" in _fake_agent.calls[0][1]
+    assert agent.calls[0][0] is None  # no agent configured -> default
+    assert "binary_sensor.office_presence" in agent.calls[0][1]
 
     reloaded = reload_behaviours(hass)
     proposed = [b for b in reloaded if b.name == "Evening handoff"]
@@ -97,7 +99,7 @@ async def test_run_analysis_adds_and_persists_candidates(hass: HomeAssistant) ->
 
     # Second run with the same answer: deterministic ids deduplicate.
     again = await async_run_analysis(
-        hass, entry, runtime, history_provider=_fake_history, agent_call=_fake_agent
+        hass, entry, runtime, history_provider=_fake_history, agent_call=agent
     )
     assert again == 0
 
@@ -109,11 +111,9 @@ async def test_run_analysis_survives_unparseable_llm_output(
     entry = await setup_entry(hass)
     runtime = hass.data[DOMAIN][entry.entry_id]
 
-    async def babbling_agent(hass, agent_id, prompt):
-        return "I'm not sure, maybe something with the kitchen?"
-
+    babbling = FakeAgent("I'm not sure, maybe something with the kitchen?")
     added = await async_run_analysis(
-        hass, entry, runtime, history_provider=_fake_history, agent_call=babbling_agent
+        hass, entry, runtime, history_provider=_fake_history, agent_call=babbling
     )
     assert added == 0
     assert len(reload_behaviours(hass)) == 1  # store untouched
@@ -128,9 +128,7 @@ async def test_run_analysis_service_reports_unavailable_recorder(
 
     # No recorder in the test harness -> friendly validation error, not a crash.
     with pytest.raises(ServiceValidationError) as excinfo:
-        await hass.services.async_call(
-            DOMAIN, SERVICE_RUN_ANALYSIS, {}, blocking=True
-        )
+        await hass.services.async_call(DOMAIN, SERVICE_RUN_ANALYSIS, {}, blocking=True)
     assert "recorder" in str(excinfo.value)
 
 
@@ -150,7 +148,7 @@ async def test_analysis_history_provider_error_maps_to_unavailable(
             entry,
             runtime,
             history_provider=empty_history,
-            agent_call=_fake_agent,
+            agent_call=FakeAgent(),
         )
 
 

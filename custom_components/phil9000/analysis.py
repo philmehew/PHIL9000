@@ -73,15 +73,20 @@ async def async_collect_history(
             continue
         states = changes.get(entity_id, [])
         if states:
-            events_by_entity[entity_id] = [
-                (state.last_changed, state.state) for state in states
-            ]
+            events_by_entity[entity_id] = [(state.last_changed, state.state) for state in states]
     return events_by_entity
 
 
-async def async_call_agent(
-    hass: HomeAssistant, agent_id: str | None, prompt: str
-) -> str:
+def _dig(data: object, *keys: str) -> Any:
+    """Walk nested JSON values, yielding None when a key path doesn't hold."""
+    for key in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+async def async_call_agent(hass: HomeAssistant, agent_id: str | None, prompt: str) -> str:
     """Ask the household's conversation agent (no API keys of our own)."""
     payload: dict[str, Any] = {"text": prompt}
     if agent_id:
@@ -89,9 +94,8 @@ async def async_call_agent(
     response = await hass.services.async_call(
         "conversation", "process", payload, blocking=True, return_response=True
     )
-    speech = ((response or {}).get("response") or {}).get("speech") or {}
-    plain = speech.get("plain") or {}
-    return str(plain.get("speech", ""))
+    # response shape: {"response": {"speech": {"plain": {"speech": "..."}}}}
+    return str(_dig(response, "response", "speech", "plain", "speech") or "")
 
 
 async def async_run_analysis(
@@ -110,16 +114,12 @@ async def async_run_analysis(
     """
     entities = list(entry.data.get(CONF_ENTITIES, []))
     days = int(entry.options.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS))
-    provider = history_provider or (
-        lambda: async_collect_history(hass, entities, days)
-    )
+    provider = history_provider or (lambda: async_collect_history(hass, entities, days))
     call = agent_call or async_call_agent
 
     events_by_entity = await provider()
     if not any(events_by_entity.values()):
-        raise AnalysisUnavailableError(
-            "no recorded history for the observed entities yet"
-        )
+        raise AnalysisUnavailableError("no recorded history for the observed entities yet")
 
     existing = list(runtime.engine.behaviours.values())
     prompt = build_prompt(summarise_history(events_by_entity), existing)

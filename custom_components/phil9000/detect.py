@@ -94,9 +94,7 @@ class DetectionEngine:
 
     # -- matching ------------------------------------------------------
 
-    def _advance(
-        self, behaviour: Behaviour, observation: Observation
-    ) -> Detection | None:
+    def _advance(self, behaviour: Behaviour, observation: Observation) -> Detection | None:
         if not behaviour.steps:
             return None
         partial = self._partial.get(behaviour.id)
@@ -105,9 +103,7 @@ class DetectionEngine:
             return self._try_start(behaviour, observation)
         return self._try_continue(behaviour, observation, partial)
 
-    def _try_start(
-        self, behaviour: Behaviour, observation: Observation
-    ) -> Detection | None:
+    def _try_start(self, behaviour: Behaviour, observation: Observation) -> Detection | None:
         """No partial match: does this event start the sequence?"""
         first = behaviour.steps[0]
         if not self._matches(first, observation):
@@ -150,9 +146,8 @@ class DetectionEngine:
         if (
             observation.entity_id != step.entity_id
             and observation.entity_id in {p.entity_id for p in partial}
-            and observation.new_state != next(
-                p.new_state for p in partial if p.entity_id == observation.entity_id
-            )
+            and observation.new_state
+            != next(p.new_state for p in partial if p.entity_id == observation.entity_id)
         ):
             self._partial.pop(behaviour.id, None)
             return None
@@ -177,10 +172,7 @@ class DetectionEngine:
 
     @staticmethod
     def _matches(step: Any, observation: Observation) -> bool:
-        return (
-            observation.entity_id == step.entity_id
-            and observation.new_state == step.to_state
-        )
+        return observation.entity_id == step.entity_id and observation.new_state == step.to_state
 
     def _complete(self, behaviour: Behaviour, moment: datetime) -> Detection | None:
         matched = self._partial.pop(behaviour.id)

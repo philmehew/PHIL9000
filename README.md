@@ -25,8 +25,10 @@ user's `config/`:
     `strings.json`, `services.yaml`, `translations/`.
   - `analyser.py` is also pure: history summaries, the discovery prompt, and
     schema-validation of LLM proposals into inert candidates.
+
 - `tests/` — pure unit tests (run without Home Assistant) plus adapter smoke tests
   using `pytest-homeassistant-custom-component` (dev-only dependency).
+
 - `main.py` — standalone demo: replays a synthetic evening through the detection engine.
 
 Learned behaviours persist as **YAML** in `<HA config>/phil9000/behaviours.yaml` —
@@ -42,22 +44,28 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
 ## Using it
 
 - PHIL9000 observes the entities you selected and tallies matches. **Candidates never act.**
+
 - A **PHIL9000 sidebar panel** lists learned behaviours with confidence, steps, schedule
   and last-fired evidence, and lets you confirm, dismiss, reopen, and edit each
   behaviour's actions (talks to the `phil9000/behaviours`, `phil9000/set_status` and
   `phil9000/set_actions` websocket commands).
+
 - When a candidate pattern is first seen you also get a nudge (via the `notify` entity
   from the options, otherwise a persistent notification) with the pattern and its id.
+
 - You can also confirm or dismiss from *Developer Tools → Actions* (or a script):
   `phil9000.confirm_behaviour` / `phil9000.dismiss_behaviour` with `behaviour_id`.
+
 - Confirmed behaviours fire the `phil9000_behaviour_detected` event and execute their
   actions (HA service calls defined in the YAML) — deterministic Python, no LLM.
+
 - **Optional pattern discovery**: enable *nightly pattern analysis* in the integration
   options (off by default) and/or call `phil9000.run_analysis` on demand. PHIL9000
   summarises the recent recorder history and asks the household's Assist conversation
   agent for recurring patterns. Proposals are schema-validated, arrive as candidates
   with **no actions**, never re-propose known patterns, and nothing executes until you
   confirm them — the LLM only ever discovers; detection and action stay pure Python.
+
 - Anything you confirm, dismiss or learn survives restarts.
 
 ## Example behaviour
@@ -97,10 +105,13 @@ behaviours:
 - **Times are UTC everywhere.** State timestamps, detection windows and the analyser
   prompt all use UTC. A `time_start: "17:30"` that means "5:30pm local" needs converting
   for your timezone (local-time windows are a planned follow-up).
+
 - A corrupt `behaviours.yaml` puts the integration into setup-retry (visible in
   *Settings → Devices & Services*) rather than silently starting empty — fix or restore
   the file, then retry.
+
 - The entity pickers only list entities that currently exist in HA.
+
 - Suggestions nudge once per candidate per HA run; the panel and YAML remain the
   long-term record.
 
@@ -116,7 +127,9 @@ uv run python main.py  # replay a synthetic evening and watch detection fire
 ## Philosophy
 
 - **Observe first.** PHIL9000 proposes patterns; it never acts autonomously by default.
+
 - **LLM for discovery, Python for execution.** Pattern *detection* and action execution
   are deterministic Python; the LLM (via Home Assistant Assist) only proposes candidates.
+
 - **You stay in the loop.** Every learned behaviour can be inspected, corrected, confirmed,
   or dismissed.

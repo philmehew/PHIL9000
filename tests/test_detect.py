@@ -50,9 +50,7 @@ class TestHappyPath:
 
     def test_on_detect_callback(self, confirmed_behaviour: Behaviour) -> None:
         seen = []
-        engine = DetectionEngine(
-            [confirmed_behaviour], on_detect=lambda b, m: seen.append((b, m))
-        )
+        engine = DetectionEngine([confirmed_behaviour], on_detect=lambda b, m: seen.append((b, m)))
         engine.observe_all([obs(OFFICE, "off", MON_17_30), obs(KITCHEN, "on", MON_17_33)])
         assert len(seen) == 1
         assert seen[0][0] is confirmed_behaviour
@@ -131,9 +129,7 @@ class TestCandidateStatus:
 
 
 class TestCooldown:
-    def test_second_match_suppressed_within_cooldown(
-        self, confirmed_behaviour: Behaviour
-    ) -> None:
+    def test_second_match_suppressed_within_cooldown(self, confirmed_behaviour: Behaviour) -> None:
         engine = DetectionEngine([confirmed_behaviour])
         engine.observe_all([obs(OFFICE, "off", MON_17_30), obs(KITCHEN, "on", MON_17_32)])
         detections = engine.observe_all(

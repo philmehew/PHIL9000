@@ -135,18 +135,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "PHIL9000 could not load %s — fix or restore the file, then retry",
             store.path,
         )
-        raise ConfigEntryNotReady(
-            f"{store.path} is invalid: {type(err).__name__}: {err}"
-        ) from err
+        raise ConfigEntryNotReady(f"{store.path} is invalid: {type(err).__name__}: {err}") from err
 
     engine = DetectionEngine(behaviours, on_detect=_detection_callback(hass))
     runtime = Phil9000Runtime(engine=engine, store=store)
     hass.data[DOMAIN][entry.entry_id] = runtime
 
     entities: list[str] = list(entry.data[CONF_ENTITIES])
-    unsub = async_track_state_change_event(
-        hass, entities, _event_handler(hass, entry, runtime)
-    )
+    unsub = async_track_state_change_event(hass, entities, _event_handler(hass, entry, runtime))
     entry.async_on_unload(unsub)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -180,9 +176,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         def _nightly(now) -> None:  # noqa: ANN001
             hass.async_create_task(_async_nightly_analysis(hass, entry, runtime))
 
-        entry.async_on_unload(
-            async_track_time_change(hass, _nightly, hour=3, minute=30, second=0)
-        )
+        entry.async_on_unload(async_track_time_change(hass, _nightly, hour=3, minute=30, second=0))
         _LOGGER.debug("PHIL9000 nightly analysis scheduled (03:30)")
 
     await _async_ensure_ui(hass)
@@ -199,9 +193,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if event.data.get("component") in ("frontend", "http"):
                 hass.async_create_task(_async_ensure_ui(hass))
 
-        entry.async_on_unload(
-            hass.bus.async_listen(EVENT_COMPONENT_LOADED, _component_loaded)
-        )
+        entry.async_on_unload(hass.bus.async_listen(EVENT_COMPONENT_LOADED, _component_loaded))
 
     _LOGGER.debug(
         "PHIL9000 observing %d entities, %d behaviours loaded",
@@ -333,17 +325,13 @@ def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Run
         observation = Observation(
             entity_id=event.data["entity_id"],
             new_state=new_state.state,
-            old_state=event.data["old_state"].state
-            if event.data.get("old_state")
-            else None,
+            old_state=event.data["old_state"].state if event.data.get("old_state") else None,
             timestamp=new_state.last_changed,
             attributes=dict(new_state.attributes),
         )
         before = {bid: b.occurrences for bid, b in engine.behaviours.items()}
         for detection in engine.observe(observation):
-            trail = " → ".join(
-                f"{o.entity_id}={o.new_state}" for o in detection.matched
-            )
+            trail = " → ".join(f"{o.entity_id}={o.new_state}" for o in detection.matched)
             _LOGGER.info(
                 "Detected %s (confidence %.0f%%): %s",
                 detection.behaviour.name,
@@ -370,16 +358,12 @@ def _event_handler(hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Run
                     and behaviour.id not in runtime.suggested
                 ):
                     runtime.suggested.add(behaviour.id)
-                    hass.async_create_task(
-                        _notify_suggestion(hass, entry, behaviour)
-                    )
+                    hass.async_create_task(_notify_suggestion(hass, entry, behaviour))
 
     return handle_event
 
 
-async def _notify_suggestion(
-    hass: HomeAssistant, entry: ConfigEntry, behaviour: Behaviour
-) -> None:
+async def _notify_suggestion(hass: HomeAssistant, entry: ConfigEntry, behaviour: Behaviour) -> None:
     """Nudge the user about a candidate pattern (secondary channel to UI)."""
     title = "PHIL9000 noticed a pattern"
     steps = " → ".join(f"{s.entity_id} = {s.to_state}" for s in behaviour.steps)
@@ -396,9 +380,7 @@ async def _notify_suggestion(
 # -- confirm / dismiss services -------------------------------------------
 
 
-def _status_service_handler(
-    hass: HomeAssistant, entry: ConfigEntry, status: BehaviourStatus
-):  # noqa: ANN202
+def _status_service_handler(hass: HomeAssistant, entry: ConfigEntry, status: BehaviourStatus):  # noqa: ANN202
     """Build a confirm/dismiss service handler for this config entry."""
 
     async def handle(call: ServiceCall) -> None:

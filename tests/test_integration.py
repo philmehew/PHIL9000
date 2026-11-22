@@ -54,9 +54,7 @@ async def test_confirmed_behaviour_fires_event_and_runs_actions(
     actions = capture_calls(hass, ACTION_DOMAIN, ACTION_SERVICE)
     behaviour = end_of_work_day()  # seeded as CONFIRMED
     behaviour.actions = [
-        BehaviourAction(
-            ACTION_DOMAIN, ACTION_SERVICE, ACTION_TARGET, {"note": "welcome home"}
-        )
+        BehaviourAction(ACTION_DOMAIN, ACTION_SERVICE, ACTION_TARGET, {"note": "welcome home"})
     ]
     seed_behaviours(hass, behaviour)
     detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
@@ -98,9 +96,7 @@ async def test_candidate_nudges_once_and_never_fires(hass: HomeAssistant) -> Non
     actions = capture_calls(hass, ACTION_DOMAIN, ACTION_SERVICE)
     notifies = capture_calls(hass, "notify", "send_message")
     behaviour = end_of_work_day(status=BehaviourStatus.CANDIDATE)
-    behaviour.actions = [
-        BehaviourAction(ACTION_DOMAIN, ACTION_SERVICE, ACTION_TARGET, {})
-    ]
+    behaviour.actions = [BehaviourAction(ACTION_DOMAIN, ACTION_SERVICE, ACTION_TARGET, {})]
     seed_behaviours(hass, behaviour)
     detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
 
@@ -129,9 +125,7 @@ async def test_confirm_service_promotes_candidate_and_later_detection_acts(
     actions = capture_calls(hass, ACTION_DOMAIN, ACTION_SERVICE)
     capture_calls(hass, "notify", "send_message")
     behaviour = end_of_work_day(status=BehaviourStatus.CANDIDATE)
-    behaviour.actions = [
-        BehaviourAction(ACTION_DOMAIN, ACTION_SERVICE, ACTION_TARGET, {})
-    ]
+    behaviour.actions = [BehaviourAction(ACTION_DOMAIN, ACTION_SERVICE, ACTION_TARGET, {})]
     seed_behaviours(hass, behaviour)
     detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
 
@@ -197,9 +191,7 @@ def test_services_yaml_matches_registered_services() -> None:
 
     from homeassistant.util.yaml import load_yaml_dict
 
-    path = Path(__file__).resolve().parent.parent / (
-        "custom_components/phil9000/services.yaml"
-    )
+    path = Path(__file__).resolve().parent.parent / ("custom_components/phil9000/services.yaml")
     declared = load_yaml_dict(str(path))
     assert set(declared) == {
         SERVICE_CONFIRM_BEHAVIOUR,

@@ -83,10 +83,7 @@ class TestYamlStore:
     def test_duplicate_ids_rejected(self, tmp_path: Path) -> None:
         path = tmp_path / "behaviours.yaml"
         path.write_text(
-            "version: 1\n"
-            "behaviours:\n"
-            "  - id: dup\n    name: One\n"
-            "  - id: dup\n    name: Two\n",
+            "version: 1\nbehaviours:\n  - id: dup\n    name: One\n  - id: dup\n    name: Two\n",
             encoding="utf-8",
         )
         store = BehaviourStore(path)

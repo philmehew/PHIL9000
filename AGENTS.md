@@ -31,22 +31,29 @@ desk is powered down.
 
 - **Event / observation:** a timestamped entity state change (e.g. `binary_sensor.office_presence`
   → `off` at 17:30).
+
 - **Behaviour (pattern):** a named, recurring sequence/correlation of observations with typical
   timing and confidence (e.g. "end of work day": office presence off → kitchen presence on, within
   ~2–5 min, weekdays ~17:00–18:00).
+
 - **Suggestion:** PHIL9000's proposal to the user: "I've noticed X — is this the end of your work
   day? Would you like me to do Y when it happens?"
+
 - **Confirmed behaviour / action:** a behaviour the user has confirmed, plus the action(s) to
   execute when it is detected. Executed via pure Python matching, no LLM.
 
 ## Technical constraints
 
 - Python 3.13, managed with `uv` (`pyproject.toml`, `.python-version`).
+
 - Target: Home Assistant custom integration structure (`custom_components/phil9000/`), installable
   via HACS/Marketplace.
+
 - Persistence must survive restarts (Home Assistant storage helpers or similar) — learned patterns
   are valuable and must not be lost.
+
 - Sensor/state history access via Home Assistant APIs (event bus, state machine, recorder/history).
+
 - Tests for pattern detection and matching logic — this is the core value and must be deterministic.
 
 ## Repo status

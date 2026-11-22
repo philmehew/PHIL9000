@@ -16,8 +16,10 @@ from homeassistant.helpers.selector import (
     EntitySelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
 from .analyser import DEFAULT_LOOKBACK_DAYS
@@ -38,9 +40,7 @@ class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             entities = user_input.get(CONF_ENTITIES) or []
@@ -66,12 +66,9 @@ class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_ENTITIES): SelectSelector(
                     SelectSelectorConfig(
-                        options=[
-                            {"value": entity_id, "label": entity_id}
-                            for entity_id in candidates
-                        ],
+                        options=candidates,  # label == value
                         multiple=True,
-                        mode="list",
+                        mode=SelectSelectorMode.LIST,
                         sort=True,
                     )
                 ),
@@ -88,9 +85,7 @@ class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
 class Phil9000OptionsFlow(OptionsFlow):
     """Conversation agent (for the future LLM analyser), notify target, cooldowns."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             agent_id = (user_input.get(OPTION_AGENT_ID) or "").strip() or None
             notify_entity = (user_input.get(OPTION_NOTIFY_ENTITY) or "").strip() or None
@@ -105,13 +100,9 @@ class Phil9000OptionsFlow(OptionsFlow):
                     OPTION_AGENT_ID: agent_id,
                     OPTION_NOTIFY_ENTITY: notify_entity,
                     OPTION_COOLDOWN_DEFAULT: int(
-                        user_input.get(
-                            OPTION_COOLDOWN_DEFAULT, DEFAULT_COOLDOWN_DEFAULT
-                        )
+                        user_input.get(OPTION_COOLDOWN_DEFAULT, DEFAULT_COOLDOWN_DEFAULT)
                     ),
-                    OPTION_ANALYSIS_ENABLED: bool(
-                        user_input.get(OPTION_ANALYSIS_ENABLED, False)
-                    ),
+                    OPTION_ANALYSIS_ENABLED: bool(user_input.get(OPTION_ANALYSIS_ENABLED, False)),
                     OPTION_ANALYSIS_DAYS: int(
                         user_input.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS)
                     ),
@@ -127,12 +118,9 @@ class Phil9000OptionsFlow(OptionsFlow):
                     default=sorted(self.config_entry.data.get(CONF_ENTITIES, [])),
                 ): SelectSelector(
                     SelectSelectorConfig(
-                        options=[
-                            {"value": entity_id, "label": entity_id}
-                            for entity_id in candidates
-                        ],
+                        options=candidates,  # label == value
                         multiple=True,
-                        mode="list",
+                        mode=SelectSelectorMode.LIST,
                         sort=True,
                     )
                 ),
@@ -151,7 +139,7 @@ class Phil9000OptionsFlow(OptionsFlow):
                     OPTION_COOLDOWN_DEFAULT,
                     default=current.get(OPTION_COOLDOWN_DEFAULT, DEFAULT_COOLDOWN_DEFAULT),
                 ): NumberSelector(
-                    NumberSelectorConfig(min=0, max=86400, step=60, mode="box")
+                    NumberSelectorConfig(min=0, max=86400, step=60, mode=NumberSelectorMode.BOX)
                 ),
                 vol.Optional(
                     OPTION_ANALYSIS_ENABLED,
@@ -160,7 +148,9 @@ class Phil9000OptionsFlow(OptionsFlow):
                 vol.Optional(
                     OPTION_ANALYSIS_DAYS,
                     default=current.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS),
-                ): NumberSelector(NumberSelectorConfig(min=1, max=90, step=1, mode="box")),
+                ): NumberSelector(
+                    NumberSelectorConfig(min=1, max=90, step=1, mode=NumberSelectorMode.BOX)
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

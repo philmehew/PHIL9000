@@ -35,9 +35,7 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
     hass.states.async_set(OFFICE, "on")
     hass.states.async_set(KITCHEN, "off")
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
 
@@ -54,12 +52,8 @@ async def test_user_flow_requires_entities_then_recovers(
     hass: HomeAssistant,
 ) -> None:
     hass.states.async_set(OFFICE, "on")
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ENTITIES: []}
-    )
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_ENTITIES: []})
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "no_entities"}
 

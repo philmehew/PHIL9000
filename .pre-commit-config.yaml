@@ -24,6 +24,12 @@ repos:
       - id: mixed-line-ending
       - id: trailing-whitespace
 
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.17.2
+    hooks:
+      - id: markdownlint-cli2
+        exclude: ^PLAN\.md$ # historical draft, left as written
+
   - repo: local
     hooks:
       - id: uv-lock
@@ -33,9 +39,28 @@ repos:
         files: ^(pyproject\.toml|uv\.lock)$
         pass_filenames: false
 
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check .
+        entry: uv run ruff check
+        language: system
+        types_or: [python, pyi]
+
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q
         language: system
         types_or: [python, pyi]
         pass_filenames: false

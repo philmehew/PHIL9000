@@ -1,0 +1,15 @@
+// markdownlint-cli2 configuration for PHIL9000 docs.
+// Rules: defaults, minus the noisy ones for this project's style.
+{
+  "config": {
+    "default": true,
+    "MD013": false, // line length — prose wraps are manual
+    "MD024": { "siblings_only": true }, // repeated headings under different sections
+    "MD026": false, // trailing punctuation in headings (we use "Why?")
+    "MD033": false // inline HTML allowed
+  },
+  "gitignore": true,
+  "ignores": [
+    "**/PLAN.md" // historical draft, left as written
+  ]
+}
