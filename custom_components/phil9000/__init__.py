@@ -82,6 +82,11 @@ class Phil9000Runtime:
     # behaviour_id -> payload of the most recent detection (in-memory
     # evidence shown in the UI; the observation history itself is HA's).
     last_detections: dict[str, dict] = field(default_factory=dict)
+    # Panel subscribers for the live activity feed: callbacks taking one
+    # feed row (see activity.py) and never raising.
+    activity_subscribers: list[Callable[[dict], None]] = field(default_factory=list)
+    # True while an LLM analysis pass is running (one run at a time).
+    analysis_running: bool = False
 
     # -- mutations shared by services and the websocket API --------------
 
@@ -107,6 +112,14 @@ class Phil9000Runtime:
         """Replace a behaviour's actions and persist immediately."""
         behaviour = self.require_behaviour(behaviour_id)
         behaviour.actions = list(actions)
+        await _async_save(hass, self)
+        return behaviour
+
+    async def async_rename(self, hass: HomeAssistant, behaviour_id: str, name: str) -> Behaviour:
+        """Give a behaviour the user's own name; LLM refinements then keep it."""
+        behaviour = self.require_behaviour(behaviour_id)
+        behaviour.name = name
+        behaviour.custom_name = True
         await _async_save(hass, self)
         return behaviour
 
@@ -344,15 +357,21 @@ def _event_handler(
         entity_id = event.data["entity_id"]
         if new_state is None:  # entity removed
             return
+        old_state = event.data.get("old_state")
+        if old_state is not None and old_state.state == new_state.state:
+            # Attribute-only change: never matches a step, and it would flood
+            # the activity feed (chatty sensors update attributes constantly).
+            return
         if not subscriptions.matches(entity_id, is_noise):
             return
         observation = Observation(
             entity_id=entity_id,
             new_state=new_state.state,
-            old_state=event.data["old_state"].state if event.data.get("old_state") else None,
+            old_state=old_state.state if old_state else None,
             timestamp=new_state.last_changed,
             attributes=dict(new_state.attributes),
         )
+        _publish_activity(runtime, observation)
         before = {bid: b.occurrences for bid, b in engine.behaviours.items()}
         for detection in engine.observe(observation):
             trail = " → ".join(f"{o.entity_id}={o.new_state}" for o in detection.matched)
@@ -385,6 +404,23 @@ def _event_handler(
                     hass.async_create_task(_notify_suggestion(hass, entry, behaviour))
 
     return handle_event
+
+
+def _publish_activity(runtime: Phil9000Runtime, observation: Observation) -> None:
+    """Push a live feed row to the panel's activity subscribers (best effort)."""
+    if not runtime.activity_subscribers:
+        return
+    row = {
+        "entity_id": observation.entity_id,
+        "at": observation.timestamp.isoformat(),
+        "old_state": observation.old_state,
+        "new_state": observation.new_state,
+    }
+    for subscriber in list(runtime.activity_subscribers):
+        try:
+            subscriber(row)
+        except Exception:  # noqa: BLE001 — a stale connection must not break observing
+            _LOGGER.debug("PHIL9000 activity subscriber failed", exc_info=True)
 
 
 async def _notify_suggestion(hass: HomeAssistant, entry: ConfigEntry, behaviour: Behaviour) -> None:

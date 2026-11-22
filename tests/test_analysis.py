@@ -24,6 +24,7 @@ from custom_components.phil9000.const import (
     OPTION_NOTIFY_ENTITY,
     SERVICE_RUN_ANALYSIS,
 )
+from custom_components.phil9000.models import BehaviourStatus
 from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
     KITCHEN,
@@ -79,12 +80,12 @@ async def test_run_analysis_adds_and_persists_candidates(hass: HomeAssistant) ->
     runtime = hass.data[DOMAIN][entry.entry_id]
     agent = FakeAgent()
 
-    added = await async_run_analysis(
+    summary = await async_run_analysis(
         hass, entry, runtime, history_provider=_fake_history, agent_call=agent
     )
     await hass.async_block_till_done()
 
-    assert added == 1
+    assert summary == {"refined": [], "new": ["Evening handoff"]}
     assert agent.calls[0][0] is None  # no agent configured -> default
     assert "binary_sensor.office_presence" in agent.calls[0][1]
 
@@ -95,13 +96,76 @@ async def test_run_analysis_adds_and_persists_candidates(hass: HomeAssistant) ->
     assert proposed[0].actions == []
 
     assert len(notifies) == 1
-    assert "1 new candidate" in notifies[0].data["message"]
+    assert "Proposed 1 new candidate behaviour(s)" in notifies[0].data["message"]
 
     # Second run with the same answer: deterministic ids deduplicate.
     again = await async_run_analysis(
         hass, entry, runtime, history_provider=_fake_history, agent_call=agent
     )
-    assert again == 0
+    assert again == {"refined": [], "new": []}
+
+
+async def test_run_analysis_refines_candidate_and_persists(hass: HomeAssistant) -> None:
+    candidate = end_of_work_day(status=BehaviourStatus.CANDIDATE)
+    candidate.occurrences = 2
+    seed_behaviours(hass, candidate)
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+
+    update = {
+        "id": "end_of_work_day",
+        "name": "Work's done",
+        "description": "Consistently 17:30, gaps under three minutes.",
+        "steps": [
+            {"entity_id": OFFICE, "to_state": "off"},
+            {"entity_id": KITCHEN, "to_state": "on", "max_gap_seconds": 180},
+        ],
+        "weekdays": [1, 2, 3, 4, 5],
+        "time_start": "17:00",
+        "time_end": "18:30",
+    }
+    agent = FakeAgent(json.dumps({"updates": [update], "new": []}))
+
+    summary = await async_run_analysis(
+        hass, entry, runtime, history_provider=_fake_history, agent_call=agent
+    )
+
+    assert summary == {"refined": ["Work's done"], "new": []}
+    reloaded = reload_behaviours(hass)
+    assert len(reloaded) == 1
+    refined = reloaded[0]
+    assert refined.name == "Work's done"
+    assert refined.steps[1].max_gap_seconds == 180
+    assert refined.status.value == "candidate"
+    assert refined.occurrences == 2  # the engine's tally is untouched
+
+
+async def test_run_analysis_refuses_concurrent_runs(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.analysis_running = True
+
+    with pytest.raises(AnalysisUnavailableError, match="already in progress"):
+        await async_run_analysis(
+            hass, entry, runtime, history_provider=_fake_history, agent_call=FakeAgent()
+        )
+    assert runtime.analysis_running is True  # the guard was not clobbered
+
+
+async def test_in_flight_guard_resets_after_agent_failure(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+
+    async def broken_agent(hass_, agent_id, prompt):  # noqa: ANN001
+        raise TimeoutError("agent timed out")
+
+    with pytest.raises(AnalysisUnavailableError, match="agent call failed"):
+        await async_run_analysis(
+            hass, entry, runtime, history_provider=_fake_history, agent_call=broken_agent
+        )
+    assert runtime.analysis_running is False
 
 
 async def test_run_analysis_survives_unparseable_llm_output(
@@ -112,10 +176,10 @@ async def test_run_analysis_survives_unparseable_llm_output(
     runtime = hass.data[DOMAIN][entry.entry_id]
 
     babbling = FakeAgent("I'm not sure, maybe something with the kitchen?")
-    added = await async_run_analysis(
+    summary = await async_run_analysis(
         hass, entry, runtime, history_provider=_fake_history, agent_call=babbling
     )
-    assert added == 0
+    assert summary == {"refined": [], "new": []}
     assert len(reload_behaviours(hass)) == 1  # store untouched
 
 

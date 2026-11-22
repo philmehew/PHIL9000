@@ -1,10 +1,13 @@
 /**
- * PHIL9000 sidebar panel — lists learned behaviours with confidence and
- * evidence; confirm / dismiss / reopen and edit a behaviour's actions.
+ * PHIL9000 sidebar panel — recent activity feed, learned behaviours with
+ * confidence and evidence; confirm / dismiss / reopen, rename, edit actions,
+ * and an "Analyse now" button that runs the LLM pattern analysis.
  *
  * Plain JS web component, no build step and no framework. Data flows over
- * the Home Assistant websocket API (phil9000/behaviours, phil9000/set_status,
- * phil9000/set_actions); the panel refreshes on phil9000_behaviour_detected.
+ * the Home Assistant websocket API (phil9000/behaviours, phil9000/activity,
+ * phil9000/subscribe_activity, phil9000/run_analysis, phil9000/set_status,
+ * phil9000/set_name, phil9000/set_actions); the panel refreshes on
+ * phil9000_behaviour_detected.
  */
 
 const STATUS_RANK = { confirmed: 0, candidate: 1, dismissed: 2 };
@@ -43,6 +46,13 @@ const actionLabel = (a) =>
 const formatWhen = (iso) => {
   const date = new Date(iso);
   return isNaN(date) ? iso : date.toLocaleString();
+};
+
+const formatClock = (iso) => {
+  const date = new Date(iso);
+  if (isNaN(date)) return iso;
+  const today = new Date().toDateString() === date.toDateString();
+  return today ? date.toLocaleTimeString() : date.toLocaleString();
 };
 
 const STYLE = `
@@ -88,6 +98,23 @@ const STYLE = `
               color: var(--primary-text-color); font-size: 12px; min-width: 0; }
     .error { background: rgba(192,57,43,.12); color: #c0392b; padding: 10px 14px;
              border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+    .note { background: rgba(25,118,210,.10); color: #1976d2; padding: 10px 14px;
+            border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+    .section { font-size: 14px; font-weight: 500; margin: 18px 0 8px;
+               color: var(--secondary-text-color); text-transform: uppercase;
+               letter-spacing: .05em; }
+    .act-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+    .act-list li { display: flex; gap: 10px; padding: 3px 0; align-items: baseline;
+                   border-bottom: 1px solid var(--divider-color); }
+    .act-list li:last-child { border-bottom: none; }
+    .act-time { font-family: monospace; font-size: 12px; color: var(--secondary-text-color);
+                flex: 0 0 86px; }
+    .act-entity { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
+    .act-change { color: var(--secondary-text-color); }
+    .name-input { font-size: 16px; padding: 4px 8px; width: 300px; max-width: 70%;
+                  border: 1px solid var(--divider-color); border-radius: 6px;
+                  background: var(--card-background-color);
+                  color: var(--primary-text-color); }
     .empty { color: var(--secondary-text-color); font-size: 14px; }
   </style>`;
 
@@ -102,17 +129,101 @@ class Phil9000Panel extends HTMLElement {
     this._busy = false;
     this._editing = null; // behaviour_id while its action editor is open
     this._draft = []; // actions being edited (copy of stored actions)
+    this._renaming = null; // behaviour_id while its name input is open
+    this._activity = [];
+    this._activityHint = "";
+    this._analysing = false;
+    this._analysisNote = null;
 
     this.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
+      <button data-act="analyse" ${this._analysing ? "disabled" : ""}>Analyse now</button>
       <button class="secondary" data-act="refresh">Refresh</button></header>
-      <p class="meta"></p><div id="banner"></div><div id="body"><p class="empty">Loading…</p></div>`;
+      <p class="meta"></p><div id="banner"></div>
+      <h2 class="section">Recent activity</h2><div id="activity"><p class="empty">Loading…</p></div>
+      <h2 class="section">Behaviours</h2><div id="body"><p class="empty">Loading…</p></div>`;
     this.addEventListener("click", (ev) => this._onClick(ev));
+    this.addEventListener("keydown", (ev) => {
+      if (ev.target.classList.contains("name-input")) {
+        if (ev.key === "Enter") ev.target.closest(".card").querySelector('[data-act="save-name"]').click();
+        if (ev.key === "Escape") {
+          this._renaming = null;
+          this._render();
+        }
+      }
+    });
 
     hass.connection.subscribeEvents(
       () => this._refresh(),
       "phil9000_behaviour_detected",
     );
+    hass.connection.subscribeMessage(
+      (row) => {
+        this._activity.unshift(row);
+        this._activity = this._activity.slice(0, 25);
+        this._activityHint = "";
+        this._renderActivity();
+      },
+      { type: "phil9000/subscribe_activity" },
+    ).catch(() => {});
     this._refresh();
+    this._reloadActivity();
+  }
+
+  async _reloadActivity() {
+    try {
+      const result = await this._hass.connection.sendMessagePromise({
+        type: "phil9000/activity",
+      });
+      this._activity = result.items || [];
+      this._activityHint = result.hint || "";
+    } catch (err) {
+      this._activityHint = err.message || String(err);
+    }
+    this._renderActivity();
+  }
+
+  _renderActivity() {
+    const el = this.querySelector("#activity");
+    if (!el) return;
+    if (this._activity.length === 0) {
+      el.innerHTML = `<p class="empty">${esc(
+        this._activityHint ||
+          "No state changes observed yet. Trigger a sensor (or use Developer Tools → " +
+            "Set State) and it should appear here within a second.",
+      )}</p>`;
+      return;
+    }
+    el.innerHTML = `<div class="card"><ul class="act-list">${this._activity
+      .map(
+        (row) => `<li>
+          <span class="act-time">${esc(formatClock(row.at))}</span>
+          <span class="act-entity">${esc(row.entity_id)}</span>
+          <span class="act-change">${esc(row.old_state ?? "—")} → <b>${esc(row.new_state)}</b></span>
+        </li>`,
+      )
+      .join("")}</ul></div>`;
+  }
+
+  async _analyse() {
+    this._analysing = true;
+    this._analysisNote = null;
+    this._error = null;
+    this._render();
+    try {
+      const res = await this._hass.connection.sendMessagePromise({
+        type: "phil9000/run_analysis",
+      });
+      const parts = [];
+      if (res.refined && res.refined.length) parts.push(`Refined: ${res.refined.join(", ")}`);
+      if (res.new && res.new.length) parts.push(`New: ${res.new.join(", ")}`);
+      this._analysisNote = parts.length
+        ? parts.join(" · ")
+        : "No new convincing patterns this time.";
+    } catch (err) {
+      this._analysisNote = `Analysis failed: ${err.message || String(err)}`;
+    }
+    this._analysing = false;
+    await this._refresh();
   }
 
   async _refresh() {
@@ -193,7 +304,26 @@ class Phil9000Panel extends HTMLElement {
     if (!btn || this._busy) return;
     const act = btn.dataset.act;
     const id = btn.dataset.id;
-    if (act === "refresh") return this._refresh();
+    if (act === "refresh") {
+      this._refresh();
+      return this._reloadActivity();
+    }
+    if (act === "analyse") return this._analyse();
+    if (act === "rename") {
+      this._renaming = id;
+      return this._render();
+    }
+    if (act === "cancel-name") {
+      this._renaming = null;
+      return this._render();
+    }
+    if (act === "save-name") {
+      const input = this.querySelector(".name-input");
+      const name = input ? input.value.trim() : "";
+      if (!name) return undefined;
+      this._renaming = null;
+      return this._send({ type: "phil9000/set_name", behaviour_id: id, name });
+    }
     if (act === "confirm") return this._send({ type: "phil9000/set_status", behaviour_id: id, status: "confirmed" });
     if (act === "dismiss") return this._send({ type: "phil9000/set_status", behaviour_id: id, status: "dismissed" });
     if (act === "reopen") return this._send({ type: "phil9000/set_status", behaviour_id: id, status: "candidate" });
@@ -226,7 +356,11 @@ class Phil9000Panel extends HTMLElement {
 
   _render() {
     const banner = this.querySelector("#banner");
-    banner.innerHTML = this._error ? `<div class="error">${esc(this._error)}</div>` : "";
+    banner.innerHTML =
+      (this._error ? `<div class="error">${esc(this._error)}</div>` : "") +
+      (this._analysisNote ? `<div class="note">${esc(this._analysisNote)}</div>` : "");
+    const analyseBtn = this.querySelector('[data-act="analyse"]');
+    if (analyseBtn) analyseBtn.disabled = this._analysing || this._busy;
     const meta = this.querySelector(".meta");
     const entities = (this._meta.observed_entities || []).length;
     meta.innerHTML =
@@ -247,14 +381,23 @@ class Phil9000Panel extends HTMLElement {
         b.occurrences - a.occurrences,
     );
     body.innerHTML = sorted.map((b) => this._card(b)).join("");
+    if (this._renaming) {
+      const input = body.querySelector(".name-input");
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
   }
 
   _card(b) {
     const pct = Math.round(b.confidence * 100);
     const parts = [
       `<div class="card">`,
-      `<h3>${esc(b.name)}<span class="pill ${b.status}">${b.status}</span></h3>`,
-      `<div class="id">${esc(b.id)}</div>`,
+      this._renaming === b.id
+        ? `<h3><input class="name-input" value="${esc(b.name)}" /></h3>`
+        : `<h3>${esc(b.name)}<span class="pill ${b.status}">${b.status}</span></h3>`,
+      `<div class="id">${esc(b.id)}${b.custom_name ? " · named by you" : ""}</div>`,
       b.description ? `<div class="lines">${esc(b.description)}</div>` : "",
       `<div class="conf"><span class="bar"><i style="width:${pct}%"></i></span>
          ${pct}% confidence · seen ${b.occurrences} time${b.occurrences === 1 ? "" : "s"}</div>`,
@@ -281,6 +424,12 @@ class Phil9000Panel extends HTMLElement {
     }
 
     const buttons = [];
+    if (this._renaming === b.id) {
+      buttons.push(`<button data-act="save-name" data-id="${esc(b.id)}" ${this._busy ? "disabled" : ""}>Save name</button>`);
+      buttons.push(`<button class="secondary" data-act="cancel-name">Cancel</button>`);
+    } else {
+      buttons.push(`<button class="secondary" data-act="rename" data-id="${esc(b.id)}" ${this._busy || this._editing ? "disabled" : ""}>Rename</button>`);
+    }
     if (b.status !== "confirmed")
       buttons.push(`<button data-act="confirm" data-id="${esc(b.id)}" ${this._busy ? "disabled" : ""}>Confirm</button>`);
     if (b.status !== "dismissed")

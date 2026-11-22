@@ -23,6 +23,7 @@ PURE_MODULES = [
     "detect.py",
     "yaml_store.py",
     "seed.py",
+    "activity.py",
     "analyser.py",
     "analysis.py",
     "notifier.py",

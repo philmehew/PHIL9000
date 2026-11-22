@@ -45,10 +45,14 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
 
 - PHIL9000 observes the entities you selected and tallies matches. **Candidates never act.**
 
-- A **PHIL9000 sidebar panel** lists learned behaviours with confidence, steps, schedule
-  and last-fired evidence, and lets you confirm, dismiss, reopen, and edit each
-  behaviour's actions (talks to the `phil9000/behaviours`, `phil9000/set_status` and
-  `phil9000/set_actions` websocket commands).
+- A **PHIL9000 sidebar panel** shows a live **Recent activity** feed (the newest 25 real
+  state changes on observed entities, read from Home Assistant's recorder — HA's single
+  central activity log), plus learned behaviours with confidence, steps, schedule and
+  last-fired evidence. From the panel you can confirm, dismiss, reopen, **rename**, edit
+  actions, and press **Analyse now** to run the LLM pass immediately (websocket
+  commands `phil9000/behaviours`, `phil9000/activity`, `phil9000/subscribe_activity`,
+  `phil9000/run_analysis`, `phil9000/set_status`, `phil9000/set_name`,
+  `phil9000/set_actions`).
 
 - When a candidate pattern is first seen you also get a nudge (via the `notify` entity
   from the options, otherwise a persistent notification) with the pattern and its id.
@@ -60,13 +64,51 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   actions (HA service calls defined in the YAML) — deterministic Python, no LLM.
 
 - **Optional pattern discovery**: enable *nightly pattern analysis* in the integration
-  options (off by default) and/or call `phil9000.run_analysis` on demand. PHIL9000
-  summarises the recent recorder history and asks the household's Assist conversation
-  agent for recurring patterns. Proposals are schema-validated, arrive as candidates
-  with **no actions**, never re-propose known patterns, and nothing executes until you
-  confirm them — the LLM only ever discovers; detection and action stay pure Python.
+  options (off by default), press **Analyse now**, or call `phil9000.run_analysis`.
+  PHIL9000 summarises the rolling recorder history and the current behaviour list and
+  asks the household's Assist conversation agent to do two things: *refine* existing
+  candidates (tighter windows, corrected steps, sharper descriptions) and propose new
+  patterns. Everything is schema-validated; proposals arrive as candidates with **no
+  actions**.
 
-- Anything you confirm, dismiss or learn survives restarts.
+- **Accepted behaviours are hard-fixed**: the LLM may only refine candidates. Once you
+  confirm (or dismiss) a behaviour, analysis passes leave it alone; genuinely different
+  variants come back as new candidates. Names you set in the panel are also kept
+  (`custom_name` in the YAML).
+
+- Anything you confirm, dismiss, rename or learn survives restarts.
+
+## Testing what PHIL9000 sees
+
+To verify the integration is actually getting inputs:
+
+1. Enable debug logging and reload PHIL9000:
+
+   ```yaml
+   logger:
+     logs:
+       custom_components.phil9000: debug
+   ```
+
+   Startup logs `PHIL9000 observing N entities (M domains), K behaviours loaded`;
+   N should match what you configured (noise entities — disabled, hidden,
+   diagnostic/config-category — are skipped for whole-domain subscriptions).
+
+2. Open the **PHIL9000 panel**. Toggle a sensor (or use *Developer Tools → States →
+   Set State*) and the change should appear in **Recent activity** within a second,
+   as `entity  old → new` with a local timestamp.
+
+3. What counts as an activity: a state change on an observed entity (not excluded).
+   Attribute-only changes are ignored — they can never match a behaviour step and
+   would flood the feed. Removing an entity is ignored.
+
+4. Complete a candidate's step sequence and `occurrences` increments; a confirmed
+   behaviour fires `phil9000_behaviour_detected` (watch it under *Developer Tools →
+   Events → Listen*) and runs its actions.
+
+If the feed stays empty: the panel shows a hint. Common causes are the recorder being
+unavailable, its retention purged (default ~10 days), or a `recorder: exclude:` filter
+hiding the observed entities from history.
 
 ## Example behaviour
 
@@ -98,9 +140,10 @@ behaviours:
     cooldown_seconds: 3600       # minimum seconds between firings
     confidence: 0.0              # managed by PHIL9000 (1 - 1/(occurrences+1))
     occurrences: 0               # managed by PHIL9000
+    custom_name: false           # true once you rename it; LLM refinements keep the name
 ```
 
-## Gotchas (v0.1.0)
+## Gotchas
 
 - **Times are UTC everywhere.** State timestamps, detection windows and the analyser
   prompt all use UTC. A `time_start: "17:30"` that means "5:30pm local" needs converting

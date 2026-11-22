@@ -56,16 +56,7 @@ desk is powered down.
 
 - Tests for pattern detection and matching logic — this is the core value and must be deterministic.
 
-## Repo status
+## Naming conventions
 
-Milestones 1–6 complete — **v0.1.0 (MVP)** tagged: pure domain core, HA scaffold,
-loop closure (action executor, confirm/dismiss, nudges), basic frontend (websocket
-commands + sidebar panel), Assist-backed analyser (opt-in), plus polish: ruff-clean,
-config-flow tests, corrupt-YAML setup-retry, single_config_entry, entity editing in
-options, example YAML docs, MIT license, CHANGELOG. Post-MVP ideas: local-time
-detection windows (everything is UTC today), richer evidence/history UI, action
-conditions.
-The approved MVP plan lives in `~/.opencode/plan/phil9000-mvp.md`; `PLAN.md` is the earlier draft.
-
-Naming conventions: integration domain `phil9000`, events `phil9000_behaviour_detected`,
+Integration domain `phil9000`, events `phil9000_behaviour_detected`,
 services `phil9000.*` (e.g. `phil9000.confirm_pattern`).

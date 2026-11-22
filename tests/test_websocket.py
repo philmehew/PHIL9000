@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from homeassistant.core import HomeAssistant
 
+from custom_components.phil9000 import analysis
 from custom_components.phil9000.const import EVENT_BEHAVIOUR_DETECTED
 from custom_components.phil9000.models import BehaviourStatus
 from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
     KITCHEN,
     OFFICE,
+    _fire_state_changed,
     capture_events,
     fire_evening,
     reload_behaviours,
@@ -148,3 +152,125 @@ async def test_websocket_error_paths(hass: HomeAssistant, hass_ws_client) -> Non
         },
     )
     assert out["success"] is False
+
+
+# -- activity feed ------------------------------------------------------------
+
+
+async def test_activity_hint_when_no_recorder(hass: HomeAssistant, hass_ws_client) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    out = await _send(client, 1, {"type": "phil9000/activity"})
+    assert out["success"] is True
+    assert out["result"]["items"] == []
+    assert "recorder" in out["result"]["hint"]
+
+
+async def test_activity_returns_feed_rows(hass: HomeAssistant, hass_ws_client, monkeypatch) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    hass.states.async_set(OFFICE, "off")
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    captured: dict = {}
+    rows = [
+        {
+            "entity_id": OFFICE,
+            "at": "2026-11-22T17:30:00+00:00",
+            "old_state": "on",
+            "new_state": "off",
+        }
+    ]
+
+    async def fake_fetch(hass_arg, entity_ids, limit):  # noqa: ANN001
+        captured["entity_ids"] = entity_ids
+        captured["limit"] = limit
+        return rows
+
+    monkeypatch.setattr(analysis, "async_fetch_activity", fake_fetch)
+    out = await _send(client, 1, {"type": "phil9000/activity"})
+    assert out["success"] is True
+    assert out["result"]["items"] == rows
+    assert captured["entity_ids"] == sorted([OFFICE])
+    assert captured["limit"] == 25
+
+
+async def test_subscribe_activity_pushes_live_rows(hass: HomeAssistant, hass_ws_client) -> None:
+    behaviour = end_of_work_day()  # CONFIRMED, so we also see the detection path
+    seed_behaviours(hass, behaviour)
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json({"id": 7, "type": "phil9000/subscribe_activity"})
+    out = await client.receive_json()
+    assert out["success"] is True
+
+    await fire_evening(hass, day=25)
+
+    push = await client.receive_json()
+    assert push["id"] == 7 and push["type"] == "event"
+    assert push["event"]["entity_id"] == OFFICE
+    assert push["event"]["old_state"] == "on"
+    assert push["event"]["new_state"] == "off"
+
+    push = await client.receive_json()
+    assert push["event"]["entity_id"] == KITCHEN
+    assert push["event"]["new_state"] == "on"
+
+    # Attribute-only changes are not activity: a follow-up request must come
+    # back next, with no queued push before it.
+    _fire_state_changed(hass, OFFICE, "off", "off", datetime(2026, 11, 25, 17, 40, tzinfo=UTC))
+    await hass.async_block_till_done()
+    await client.send_json({"id": 8, "type": "phil9000/behaviours"})
+    out = await client.receive_json()
+    assert out["id"] == 8 and out["success"] is True
+
+
+# -- run_analysis and rename --------------------------------------------------
+
+
+async def test_run_analysis_ws_error_and_result(
+    hass: HomeAssistant, hass_ws_client, monkeypatch
+) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    # No recorder in the harness -> friendly error, not a crash.
+    out = await _send(client, 1, {"type": "phil9000/run_analysis"})
+    assert out["success"] is False
+    assert "recorder" in out["error"]["message"]
+
+    async def fake_run(hass_arg, entry, runtime):  # noqa: ANN001
+        return {"refined": ["Refined one"], "new": ["Brand new"]}
+
+    monkeypatch.setattr(analysis, "async_run_analysis", fake_run)
+    out = await _send(client, 2, {"type": "phil9000/run_analysis"})
+    assert out["success"] is True
+    assert out["result"] == {"refined": ["Refined one"], "new": ["Brand new"]}
+
+
+async def test_set_name_persists_and_flags_custom_name(hass: HomeAssistant, hass_ws_client) -> None:
+    seed_behaviours(hass, end_of_work_day(status=BehaviourStatus.CANDIDATE))
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    out = await _send(
+        client,
+        1,
+        {
+            "type": "phil9000/set_name",
+            "behaviour_id": "end_of_work_day",
+            "name": "Dad clocks off",
+        },
+    )
+    assert out["success"] is True
+    reloaded = reload_behaviours(hass)[0]
+    assert reloaded.name == "Dad clocks off"
+    assert reloaded.custom_name is True
+
+    out = await _send(client, 2, {"type": "phil9000/set_name", "behaviour_id": "nope", "name": "X"})
+    assert out["success"] is False
+    assert out["error"]["code"] == "not_found"

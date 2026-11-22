@@ -1,11 +1,16 @@
-"""LLM analyser helpers (Milestone 5): summaries, prompts, proposal parsing.
+"""LLM analyser helpers (Milestone 5 + refinement): summaries, prompts, parsing.
 
 Pure Python — no Home Assistant imports (guarded by tests/test_purity.py).
 The HA plumbing (recorder reads, conversation-agent call, scheduling) lives
 in analysis.py. This module is deterministic and fully unit-testable, which
 is where the guardrails matter: the LLM's output only becomes a Behaviour if
-it survives parse_proposals() validation, and proposals are always CANDIDATEs
-with no actions attached — actions are the user's to define.
+it survives validation, and proposals are always CANDIDATEs with no actions
+attached — actions are the user's to define.
+
+Refinement protocol: candidates are *refined* run after run (tighter windows,
+better steps and descriptions) until the user accepts them. Confirmed and
+dismissed behaviours are hard-fixed: the LLM may never update them, and any
+"update" naming such an id is dropped.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
 
 from .models import Behaviour, BehaviourStatus, BehaviourStep
@@ -20,18 +26,29 @@ from .models import Behaviour, BehaviourStatus, BehaviourStep
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_EVENTS_PER_ENTITY = 240
 MAX_PROPOSALS_PER_RUN = 5
+MAX_UPDATES_PER_RUN = 5
 PROPOSAL_PREFIX = "llm-"
 
 PROMPT_TEMPLATE = """You analyse smart-home sensor history to find recurring household behaviour \
-patterns.
+patterns and to refine the patterns you already proposed.
 
 History of entity state changes (timestamps are UTC):
 {summary}
 
-Known behaviours — do not re-propose any of these, including dismissed ones:
+Current behaviours (JSON; "status" is the user's decision, not yours):
 {known}
 
-Reply with ONLY a JSON array (no prose, no code fences). Each element must have:
+Reply with ONLY a JSON object (no prose, no code fences):
+{{"updates": [...], "new": [...]}}
+
+"updates" — refine existing CANDIDATE behaviours whose definition the recent
+history supports (tighten or widen time windows and gaps, correct steps,
+sharpen name/description). Each element must have:
+  "id": the existing candidate's id (exactly as given),
+  plus the FULL revised definition: "name", "description", "steps",
+  and optionally "weekdays", "time_start"/"time_end".
+"new" — genuinely new recurring patterns not covered by any current behaviour.
+Each element must have:
   "name": short human name,
   "description": one sentence of what you noticed,
   "steps": [{{"entity_id": "...", "to_state": "...", "max_gap_seconds": 300}}, ...],
@@ -40,9 +57,14 @@ and optionally:
   "time_start"/"time_end": "HH:MM" UTC window in which the first step usually occurs.
 
 Rules:
+- You may only update ids whose status is "candidate". NEVER put a confirmed
+  or dismissed id in "updates" — those are hard-fixed by the user. If a
+  confirmed pattern has a genuinely different variant, propose it in "new".
+- Never re-propose or restate dismissed patterns.
 - A pattern needs 2 or more steps in a stable order; only use entities in the history.
 - max_gap_seconds is the typical maximum gap between consecutive steps (default 300).
-- Propose at most {cap} convincing patterns; if nothing is convincing, return [].
+- At most {cap} updates and {cap} new patterns; return empty lists when there is
+  nothing convincing.
 """
 
 
@@ -79,15 +101,121 @@ def summarise_history(
 # -- prompting -----------------------------------------------------------------
 
 
+def _render_existing(existing: list[Behaviour]) -> str:
+    """Current behaviours as JSON the LLM can reference and refine."""
+    if not existing:
+        return "[]"
+    rendered = [
+        {
+            "id": b.id,
+            "name": b.name,
+            "description": b.description,
+            "status": b.status.value,
+            "steps": [s.to_dict() for s in b.steps],
+            "weekdays": sorted(b.weekdays),
+            "time_start": b.time_start.isoformat() if b.time_start else None,
+            "time_end": b.time_end.isoformat() if b.time_end else None,
+            "occurrences": b.occurrences,
+        }
+        for b in existing
+    ]
+    return json.dumps(rendered, indent=1)
+
+
 def build_prompt(summary: str, existing: list[Behaviour]) -> str:
-    """Prompt for the conversation agent, steering it away from known patterns."""
-    if existing:
-        known = "\n".join(
-            f"- {b.name} [{b.status.value}]: {b.description or 'no description'}" for b in existing
-        )
-    else:
-        known = "- none"
-    return PROMPT_TEMPLATE.format(summary=summary, known=known, cap=MAX_PROPOSALS_PER_RUN)
+    """Prompt for the conversation agent: refine candidates, propose new ones."""
+    return PROMPT_TEMPLATE.format(
+        summary=summary, known=_render_existing(existing), cap=MAX_PROPOSALS_PER_RUN
+    )
+
+
+# -- reply parsing ------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class AnalysisResult:
+    """Validated LLM reply: candidates updated in place, plus brand-new ones.
+
+    ``refined`` holds the *existing* Behaviour objects that were updated (the
+    engine already owns them); ``new`` holds fresh candidates to add.
+    """
+
+    refined: list[Behaviour] = field(default_factory=list)
+    new: list[Behaviour] = field(default_factory=list)
+
+
+def _apply_update(target: Behaviour, revised: Behaviour) -> None:
+    """Copy the refined definition onto an existing candidate.
+
+    The target keeps its identity and everything the user owns: id, status,
+    actions, occurrences, confidence, cooldown — and the name once the user
+    has renamed it.
+    """
+    target.steps = revised.steps
+    target.weekdays = revised.weekdays
+    target.time_start = revised.time_start
+    target.time_end = revised.time_end
+    if not target.custom_name and revised.name:
+        target.name = revised.name
+    if revised.description:
+        target.description = revised.description
+
+
+def parse_analysis_reply(text: str, existing: list[Behaviour] | None = None) -> AnalysisResult:
+    """Turn an LLM reply into refined candidates and validated new ones.
+
+    Guardrails: updates may only touch CANDIDATE behaviours (confirmed and
+    dismissed are hard-fixed), refined definitions may not collide with any
+    other behaviour's signature, and new proposals are validated exactly like
+    before. A legacy plain-array reply is treated as new-only. Malformed
+    replies yield an empty result.
+    """
+    payload = _extract_json(text)
+    if isinstance(payload, list):
+        payload = {"new": payload}
+    if isinstance(payload, dict) and "new" not in payload and "updates" not in payload:
+        legacy = payload.get("behaviours")
+        if isinstance(legacy, list):
+            payload = {"new": legacy}
+    if not isinstance(payload, dict):
+        return AnalysisResult()
+
+    existing = existing or []
+    by_id = {b.id: b for b in existing}
+    seen = {behaviour_signature(b) for b in existing}
+
+    refined: list[Behaviour] = []
+    for item in payload.get("updates") or []:
+        if not isinstance(item, dict):
+            continue
+        target = by_id.get(str(item.get("id", "")))
+        if target is None or target.status is not BehaviourStatus.CANDIDATE:
+            continue
+        revised = _to_behaviour(item)
+        if revised is None:
+            continue
+        revised_sig = behaviour_signature(revised)
+        if revised_sig != behaviour_signature(target) and revised_sig in seen:
+            continue  # the refinement would collide with another behaviour
+        seen.add(revised_sig)
+        _apply_update(target, revised)
+        refined.append(target)
+        if len(refined) >= MAX_UPDATES_PER_RUN:
+            break
+
+    proposals: list[Behaviour] = []
+    for item in payload.get("new") or []:
+        behaviour = _to_behaviour(item)
+        if behaviour is None:
+            continue
+        signature = behaviour.id.removeprefix(PROPOSAL_PREFIX)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        proposals.append(behaviour)
+        if len(proposals) >= MAX_PROPOSALS_PER_RUN:
+            break
+    return AnalysisResult(refined=refined, new=proposals)
 
 
 # -- proposal validation ---------------------------------------------------------
@@ -172,19 +300,35 @@ def _to_behaviour(item: object) -> Behaviour | None:
     )
 
 
-def _extract_json(text: str):
-    """Best-effort extraction of the proposals JSON from an LLM reply."""
-    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-    candidate = fenced.group(1) if fenced else None
-    if candidate is None:
-        start, end = text.find("["), text.rfind("]")
-        if start == -1 or end <= start:
-            return None
-        candidate = text[start : end + 1]
-    try:
-        return json.loads(candidate)
-    except (ValueError, TypeError):
+def _bracketed(text: str, opener: str) -> str | None:
+    """The widest span from the first opener to the last matching closer."""
+    closer = "]" if opener == "[" else "}"
+    start, end = text.find(opener), text.rfind(closer)
+    if start == -1 or end <= start:
         return None
+    return text[start : end + 1]
+
+
+def _extract_json(text: str):
+    """Best-effort extraction of the reply JSON (object form or legacy array).
+
+    Tries the whole text, then a fenced block, and inside each the array
+    span before the object span (so a legacy ``[{...}]`` reply surrounded by
+    prose is not mistaken for a single object).
+    """
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    candidates = [text.strip()]
+    if fenced:
+        candidates.append(fenced.group(1).strip())
+    for candidate in candidates:
+        for blob in (candidate, _bracketed(candidate, "["), _bracketed(candidate, "{")):
+            if not blob:
+                continue
+            try:
+                return json.loads(blob)
+            except (ValueError, TypeError):
+                continue
+    return None
 
 
 def parse_proposals(text: str, existing: list[Behaviour] | None = None) -> list[Behaviour]:

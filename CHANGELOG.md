@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.4.0 — 2026-11-22
+
+### See what PHIL9000 sees, and refine until accepted
+
+- **Recent activity feed** in the panel: the newest 25 real state changes on
+  observed entities, read from Home Assistant's recorder (the single central
+  activity log) and live-appended while the panel is open. Attribute-only state
+  changes are no longer observed at all — they can't match a step and used to
+  flood chatty sensors into everything.
+
+- **Analyse now button** in the panel runs the LLM pattern analysis on demand
+  (same path as `phil9000.run_analysis`), with a result banner and a
+  one-run-at-a-time guard.
+
+- **Refinement protocol**: the analyser now receives the current behaviour list
+  (with ids and occurrence counts) and replies `{"updates": [...], "new": [...]}`
+  — candidates get their gaps, windows and descriptions firmed up as evidence
+  accumulates, instead of only new patterns being possible.
+
+- **Accepted behaviours are hard-fixed**: only candidates can be refined. The
+  parser drops any update naming a confirmed or dismissed behaviour, and a
+  refinement that would collide with another behaviour's signature. Variants of
+  confirmed patterns come back as new candidates.
+
+- **Rename in the panel** (`phil9000/set_name`): user-given names set
+  `custom_name`, which LLM refinements then preserve. The YAML schema accepts
+  `custom_name` (defaults to false).
+
+- New websocket commands: `phil9000/activity`, `phil9000/subscribe_activity`,
+  `phil9000/run_analysis`, `phil9000/set_name`. New pure module `activity.py`
+  holds the feed-merging rules; `README.md` gained a "Testing what PHIL9000
+  sees" walkthrough.
+
 ## v0.3.2 — 2026-11-22
 
 - Brand icon refined: the eye now has a round silver bezel (was a copper

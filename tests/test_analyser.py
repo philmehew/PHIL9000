@@ -7,17 +7,18 @@ can only ever produce inert, schema-valid CANDIDATE behaviours.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 
 from custom_components.phil9000.analyser import (
     MAX_PROPOSALS_PER_RUN,
     PROPOSAL_PREFIX,
     behaviour_signature,
     build_prompt,
+    parse_analysis_reply,
     parse_proposals,
     summarise_history,
 )
-from custom_components.phil9000.models import BehaviourStatus
+from custom_components.phil9000.models import Behaviour, BehaviourStatus, BehaviourStep
 from custom_components.phil9000.seed import end_of_work_day
 
 OFFICE = "binary_sensor.office_presence"
@@ -56,14 +57,16 @@ def test_summarise_caps_long_histories():
 # -- prompt --------------------------------------------------------------------
 
 
-def test_prompt_includes_summary_and_known_behaviours():
+def test_prompt_includes_summary_and_behaviours_with_ids():
     prompt = build_prompt("OFFICE TEXT", [end_of_work_day()])
     assert "OFFICE TEXT" in prompt
     assert "End of work day" in prompt
     assert "confirmed" in prompt
-    assert "ONLY a JSON array" in prompt
+    assert "end_of_work_day" in prompt  # ids so the LLM can reference candidates
+    assert "ONLY a JSON object" in prompt
+    assert "NEVER put a confirmed" in prompt
     empty = build_prompt("S", [])
-    assert "- none" in empty
+    assert "Current behaviours (JSON" in empty
 
 
 # -- proposal parsing ------------------------------------------------------------
@@ -202,3 +205,142 @@ def test_signature_is_stable_and_action_free():
     assert behaviour_signature(proposals[0]) == behaviour_signature(
         parse_proposals(_proposal_json())[0]
     )
+
+
+# -- refinement protocol -------------------------------------------------------
+
+
+def _candidate() -> Behaviour:
+    behaviour = end_of_work_day(status=BehaviourStatus.CANDIDATE)
+    behaviour.occurrences = 3
+    behaviour.actions = []
+    return behaviour
+
+
+def _update_reply(candidate_id: str, **overrides) -> str:
+    update = {
+        "id": candidate_id,
+        "name": "Work's done",
+        "description": "Refined: consistently 17:30, gaps under 3 minutes.",
+        "steps": [
+            {"entity_id": OFFICE, "to_state": "off"},
+            {"entity_id": KITCHEN, "to_state": "on", "max_gap_seconds": 180},
+        ],
+        "weekdays": [1, 2, 3, 4, 5],
+        "time_start": "17:00",
+        "time_end": "18:30",
+    }
+    update.update(overrides)
+    return json.dumps({"updates": [update], "new": []})
+
+
+def test_refinement_updates_candidate_definition():
+    candidate = _candidate()
+    result = parse_analysis_reply(_update_reply(candidate.id), [candidate])
+
+    assert result.refined == [candidate]  # the engine's own object, in place
+    assert candidate.steps[1].max_gap_seconds == 180
+    assert candidate.time_start == time(17, 0)
+    assert candidate.time_end == time(18, 30)
+    assert candidate.name == "Work's done"
+    assert "Refined" in candidate.description
+    # User-owned fields survive untouched.
+    assert candidate.status is BehaviourStatus.CANDIDATE
+    assert candidate.occurrences == 3
+    assert candidate.cooldown_seconds == 3600
+
+
+def test_confirmed_and_dismissed_are_hard_fixed():
+    confirmed = end_of_work_day()
+    dismissed = end_of_work_day(status=BehaviourStatus.DISMISSED)
+    dismissed.id = "dismissed_one"
+
+    reply = json.dumps(
+        {
+            "updates": [
+                json.loads(_update_reply(confirmed.id))["updates"][0],
+                json.loads(_update_reply(dismissed.id))["updates"][0],
+            ],
+            "new": [],
+        }
+    )
+    result = parse_analysis_reply(reply, [confirmed, dismissed])
+
+    assert result.refined == []
+    assert confirmed.steps[1].max_gap_seconds == 300
+    assert confirmed.name == "End of work day"
+    assert dismissed.steps[1].max_gap_seconds == 300
+
+
+def test_update_with_unknown_id_is_dropped():
+    result = parse_analysis_reply(_update_reply("nope"), [_candidate()])
+    assert result.refined == []
+
+
+def test_update_collision_with_other_behaviour_is_dropped():
+    candidate = _candidate()
+    other = Behaviour(
+        id="other",
+        name="Other",
+        steps=[
+            BehaviourStep(OFFICE, "off"),
+            BehaviourStep(KITCHEN, "on", max_gap_seconds=180),
+        ],
+        weekdays={1, 2, 3, 4, 5},
+        time_start=time(17, 0),
+        time_end=time(18, 30),
+    )
+    result = parse_analysis_reply(_update_reply(candidate.id), [candidate, other])
+    assert result.refined == []
+    assert candidate.steps[1].max_gap_seconds == 300  # left alone
+
+
+def test_user_named_candidate_keeps_its_name_through_refinement():
+    candidate = _candidate()
+    candidate.name = "Dad clocks off"
+    candidate.custom_name = True
+    parse_analysis_reply(_update_reply(candidate.id), [candidate])
+    assert candidate.name == "Dad clocks off"
+    assert candidate.steps[1].max_gap_seconds == 180  # definition still refined
+
+
+def test_mixed_reply_refines_and_adds():
+    candidate = _candidate()
+    new_pattern = {
+        "name": "Morning coffee",
+        "steps": [
+            {"entity_id": "switch.coffee_machine", "to_state": "on"},
+            {"entity_id": "binary_sensor.kitchen_presence", "to_state": "on"},
+        ],
+    }
+    reply = json.dumps(
+        {
+            "updates": [json.loads(_update_reply(candidate.id))["updates"][0]],
+            "new": [new_pattern],
+        }
+    )
+    result = parse_analysis_reply(reply, [candidate])
+    assert result.refined == [candidate]
+    assert [b.name for b in result.new] == ["Morning coffee"]
+    assert result.new[0].status is BehaviourStatus.CANDIDATE
+
+
+def test_legacy_plain_array_reply_is_treated_as_new_only():
+    candidate = _candidate()
+    result = parse_analysis_reply(_proposal_json(), [candidate])
+    assert result.refined == []
+    assert [b.name for b in result.new] == ["Evening handoff"]
+
+
+def test_refined_new_proposals_still_dedupe_across_runs():
+    result = parse_analysis_reply(json.dumps({"new": json.loads(_proposal_json())}), [])
+    assert len(result.new) == 1
+    again = parse_analysis_reply(json.dumps({"new": json.loads(_proposal_json())}), result.new)
+    assert again.new == []
+
+
+def test_unparseable_and_empty_replies_yield_nothing():
+    for babble in ["", "no json here", "[oops", json.dumps({"updates": "nope"})]:
+        result = parse_analysis_reply(babble, [_candidate()])
+        assert result.refined == []
+        assert result.new == []

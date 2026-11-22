@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from . import analysis
+from .activity import DEFAULT_LIMIT
 from .const import (
     ATTR_BEHAVIOUR_ID,
     BEHAVIOURS_FILE,
@@ -50,6 +52,12 @@ def _observed_entities(hass: HomeAssistant) -> list[str]:
         )
         return subscriptions.expand(hass.states.async_entity_ids(), is_noise)
     return []
+
+
+def _entry(hass: HomeAssistant):  # noqa: ANN202 — ConfigEntry (HA type, purity guard)
+    """The (single) PHIL9000 config entry, or None."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+    return entries[0] if entries else None
 
 
 def async_setup(hass: HomeAssistant) -> None:
@@ -144,5 +152,101 @@ def async_setup(hass: HomeAssistant) -> None:
             return
         connection.send_result(msg["id"])
 
-    for handler in (handle_behaviours, handle_set_status, handle_set_actions):
+    @websocket_api.websocket_command(
+        {
+            "type": "phil9000/activity",
+            vol.Optional("limit", default=DEFAULT_LIMIT): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=200)
+            ),
+        }
+    )
+    @websocket_api.async_response
+    async def handle_activity(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        if current_runtime(hass) is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        try:
+            items = await analysis.async_fetch_activity(
+                hass, _observed_entities(hass), msg["limit"]
+            )
+        except analysis.AnalysisUnavailableError as err:
+            # Empty feed plus a hint (no recorder, or the entities are excluded
+            # from it) is more useful to the panel than a hard error.
+            connection.send_result(msg["id"], {"items": [], "hint": str(err)})
+            return
+        connection.send_result(msg["id"], {"items": items})
+
+    @websocket_api.websocket_command({"type": "phil9000/subscribe_activity"})
+    @websocket_api.async_response
+    async def handle_subscribe_activity(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Live activity feed: one message per observed state change."""
+        runtime = current_runtime(hass)
+        if runtime is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        connection.send_result(msg["id"])
+
+        def push(row: dict[str, Any]) -> None:
+            connection.send_message(websocket_api.event_message(msg["id"], row))
+
+        def unsubscribe() -> None:
+            if push in runtime.activity_subscribers:
+                runtime.activity_subscribers.remove(push)
+
+        runtime.activity_subscribers.append(push)
+        connection.subscriptions[msg["id"]] = unsubscribe
+
+    @websocket_api.websocket_command({"type": "phil9000/run_analysis"})
+    @websocket_api.async_response
+    async def handle_run_analysis(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        runtime = current_runtime(hass)
+        entry = _entry(hass)
+        if runtime is None or entry is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        try:
+            summary = await analysis.async_run_analysis(hass, entry, runtime)
+        except analysis.AnalysisUnavailableError as err:
+            # Friendly expected failures: no recorder/agent, agent error, busy.
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_SUPPORTED, str(err))
+            return
+        connection.send_result(msg["id"], summary)
+
+    @websocket_api.websocket_command(
+        {
+            "type": "phil9000/set_name",
+            vol.Required(ATTR_BEHAVIOUR_ID): str,
+            vol.Required("name"): vol.All(str, vol.Length(min=1, max=120)),
+        }
+    )
+    @websocket_api.async_response
+    async def handle_set_name(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        runtime = current_runtime(hass)
+        if runtime is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        try:
+            await runtime.async_rename(hass, msg[ATTR_BEHAVIOUR_ID], msg["name"].strip())
+        except ValueError as err:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, str(err))
+            return
+        connection.send_result(msg["id"])
+
+    for handler in (
+        handle_behaviours,
+        handle_set_status,
+        handle_set_actions,
+        handle_activity,
+        handle_subscribe_activity,
+        handle_run_analysis,
+        handle_set_name,
+    ):
         websocket_api.async_register_command(hass, handler)

@@ -133,6 +133,9 @@ class Behaviour:
     occurrences: int = 0
     status: BehaviourStatus = BehaviourStatus.CANDIDATE
     cooldown_seconds: int = 3600
+    # Set when the user renames the behaviour in the panel: LLM refinements
+    # must then leave the name alone.
+    custom_name: bool = False
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -156,6 +159,7 @@ class Behaviour:
             "occurrences": self.occurrences,
             "status": self.status.value,
             "cooldown_seconds": self.cooldown_seconds,
+            "custom_name": self.custom_name,
         }
 
     @classmethod
@@ -175,4 +179,5 @@ class Behaviour:
             occurrences=int(data.get("occurrences", 0)),
             status=BehaviourStatus(data.get("status", BehaviourStatus.CANDIDATE.value)),
             cooldown_seconds=int(data.get("cooldown_seconds", 3600)),
+            custom_name=bool(data.get("custom_name", False)),
         )

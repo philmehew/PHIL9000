@@ -7,7 +7,7 @@ tests/helpers.py.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -33,6 +33,7 @@ from tests.helpers import (
     ACTION_SERVICE,
     ACTION_TARGET,
     KITCHEN,
+    OFFICE,
     _fire_state_changed,
     capture_calls,
     capture_events,
@@ -253,3 +254,38 @@ def test_services_yaml_matches_registered_services() -> None:
         if name == SERVICE_RUN_ANALYSIS:
             continue  # takes no fields
         assert "fields" in service and "behaviour_id" in service["fields"]
+
+
+# -- attribute filtering and the live activity feed ---------------------------
+
+
+async def test_attribute_only_changes_are_not_observed(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())  # CONFIRMED
+    detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+    await setup_entry(hass)
+
+    evening = datetime(2026, 11, 25, 17, 30, tzinfo=UTC)
+    # Attribute-only office event (state stays "off"), then the kitchen step:
+    # no observation, so the sequence must not match.
+    _fire_state_changed(hass, OFFICE, "off", "off", evening)
+    _fire_state_changed(hass, KITCHEN, "off", "on", evening + timedelta(minutes=2))
+    await hass.async_block_till_done()
+
+    assert detections == []
+    assert reload_behaviours(hass)[0].occurrences == 0
+
+
+async def test_activity_subscribers_receive_live_rows(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    rows: list[dict] = []
+    runtime.activity_subscribers.append(rows.append)
+
+    await fire_evening(hass, day=25)
+
+    assert [(r["entity_id"], r["new_state"]) for r in rows] == [
+        (OFFICE, "off"),
+        (KITCHEN, "on"),
+    ]
+    assert rows[0]["old_state"] == "on"
