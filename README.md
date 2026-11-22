@@ -61,12 +61,12 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   **Pause** next to the feed title when rows scroll past too fast: live rows buffer
   (the button counts them) until you hit **Resume**.
 
-- **Monitoring** section: everything you observe, managed from the panel — a
-  **domain subscription checklist** (tick whole domains on/off) plus a searchable list
-  of *every* entity with a checkbox (tick to observe: unmute or add explicitly; untick
-  to mute). `added` and `muted` chips show why each entity is in its current state.
-  The integration options keep the same domain checklist plus the analysis/notify
-  settings, and saving them never clobbers the per-entity picks made here.
+- **Domains and Entities panels**, side by side to the right of the activity feed:
+  a **domain subscription checklist** (tick whole entity types on/off, live, no reload)
+  and a searchable list of *every* entity with a checkbox (tick to observe: unmute or
+  add explicitly; untick to mute). `added` and `muted` chips show why each entity is in
+  its current state. Observation is managed **entirely from the panel** — the
+  integration settings only hold the analysis/notify options.
   (`phil9000/monitoring`, `phil9000/set_observed`, `phil9000/set_domains`,
   `phil9000/mute_entity`, `phil9000/unmute_entity`)
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.4 — 2026-11-22
+
+### Side-by-side management panels; settings-only integration form
+
+- The panel now lays out in two columns: **Recent activity** on the left,
+  with **Domains** and **Entities** cards stacked to its right (they drop
+  underneath on narrow screens). The "Monitoring" section heading is gone —
+  the two cards are self-explanatory.
+
+- The integration settings (options flow) no longer show the domain
+  checklist: observation is managed **entirely** from the panel, and the
+  form now holds only the analysis/notify/cooldown settings. Saving it
+  cannot touch subscription data at all.
+
 ## v0.4.3 — 2026-11-22
 
 ### Entity management fully in the panel

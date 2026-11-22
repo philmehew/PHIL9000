@@ -116,11 +116,14 @@ const STYLE = `
     .section-head { display: flex; align-items: baseline; gap: 12px; }
     .section-head .section { margin-bottom: 0; }
     .section-head button { font-size: 12px; padding: 3px 12px; }
-    #activity .card { width: 50%; min-width: 340px; }
+    .top-grid { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    #activity-col { flex: 3 1 430px; min-width: 320px; }
+    #manage-col { flex: 2 1 340px; min-width: 300px; }
     .mute-btn { flex: 0 0 auto; margin-left: auto; padding: 0 9px; font-size: 13px;
                 line-height: 1.5; opacity: .65; }
     .mute-btn:hover { opacity: 1; }
-    .domain-grid { display: flex; flex-wrap: wrap; gap: 0 22px; margin-bottom: 6px; }
+    .domain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                   gap: 0 12px; }
     .domain-grid .ent-row { font-size: 12px; padding: 2px 0; }
     .entity-search { width: 100%; box-sizing: border-box; padding: 7px 10px;
                      border: 1px solid var(--divider-color); border-radius: 8px;
@@ -168,17 +171,24 @@ class Phil9000Panel extends HTMLElement {
       <button data-act="analyse" ${this._analysing ? "disabled" : ""}>Analyse now</button>
       <button class="secondary" data-act="refresh">Refresh</button></header>
       <p class="meta"></p><div id="banner"></div>
-      <div class="section-head"><h2 class="section">Recent activity</h2>
-        <button class="secondary" data-act="pause">Pause</button></div>
-      <div id="activity"><p class="empty">Loading…</p></div>
-      <h2 class="section">Monitoring</h2>
-      <div id="monitoring"><div class="card">
-        <div class="lines">Domain subscriptions</div>
-        <div class="domain-grid" id="domain-list"></div>
-        <div class="lines" id="mon-summary"></div>
-        <input class="entity-search" placeholder="Search entities — tick to observe, untick to mute…" />
-        <div class="ent-list" id="entity-list"><p class="empty">Loading…</p></div>
-      </div></div>
+      <div class="top-grid">
+        <div id="activity-col">
+          <div class="section-head"><h2 class="section">Recent activity</h2>
+            <button class="secondary" data-act="pause">Pause</button></div>
+          <div id="activity"><p class="empty">Loading…</p></div>
+        </div>
+        <div id="manage-col">
+          <h2 class="section">Domains</h2>
+          <div class="card"><div class="domain-grid" id="domain-list">
+            <p class="empty">Loading…</p>
+          </div></div>
+          <h2 class="section">Entities</h2>
+          <div class="card">
+            <input class="entity-search" placeholder="Search — tick to observe, untick to mute…" />
+            <div class="ent-list" id="entity-list"><p class="empty">Loading…</p></div>
+          </div>
+        </div>
+      </div>
       <h2 class="section">Behaviours</h2><div id="body"><p class="empty">Loading…</p></div>`;
     this.addEventListener("click", (ev) => this._onClick(ev));
     this.addEventListener("input", (ev) => {
@@ -298,29 +308,25 @@ class Phil9000Panel extends HTMLElement {
   }
 
   _renderMonitoring() {
-    const summary = this.querySelector("#mon-summary");
-    if (!summary) return;
+    const domainList = this.querySelector("#domain-list");
+    if (!domainList) return;
     const m = this._monitoring;
     if (!m) {
-      summary.textContent = "";
+      domainList.innerHTML = "";
+      const entityList = this.querySelector("#entity-list");
+      if (entityList) entityList.innerHTML = "";
       return;
     }
     const checked = new Set(m.domains || []);
-    const domainList = this.querySelector("#domain-list");
-    if (domainList) {
-      domainList.innerHTML = (m.domain_options || [])
-        .map(
-          (d) => `<label class="ent-row">
-            <input type="checkbox" data-act="set-domain" data-domain="${esc(d.value)}"
-              ${checked.has(d.value) ? "checked" : ""} />
-            <span>${esc(d.label)}</span>
-          </label>`,
-        )
-        .join("");
-    }
-    summary.innerHTML =
-      `Observing ${(m.observed || []).length} entities · ${(m.muted || []).length} muted. ` +
-      `Tick entities below to observe or mute them individually.`;
+    domainList.innerHTML = (m.domain_options || [])
+      .map(
+        (d) => `<label class="ent-row">
+          <input type="checkbox" data-act="set-domain" data-domain="${esc(d.value)}"
+            ${checked.has(d.value) ? "checked" : ""} />
+          <span>${esc(d.label)}</span>
+        </label>`,
+      )
+      .join("");
     this._renderEntityList();
   }
 

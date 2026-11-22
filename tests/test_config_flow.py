@@ -78,7 +78,7 @@ async def test_user_flow_requires_domains_then_recovers(
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
-async def test_options_flow_updates_domains_and_settings(
+async def test_options_flow_updates_settings_only(
     hass: HomeAssistant,
 ) -> None:
     seed_behaviours(hass, end_of_work_day())
@@ -89,7 +89,6 @@ async def test_options_flow_updates_domains_and_settings(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ENTITIES: ["binary_sensor"],
             OPTION_COOLDOWN_DEFAULT: 1800,
             OPTION_ANALYSIS_ENABLED: True,
             OPTION_ANALYSIS_DAYS: 14,
@@ -98,17 +97,16 @@ async def test_options_flow_updates_domains_and_settings(
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    # The checklist adds domains; per-entity specs (panel-managed) survive.
-    assert entry.data[CONF_ENTITIES] == sorted(["binary_sensor", OFFICE, KITCHEN])
     assert entry.options[OPTION_ANALYSIS_ENABLED] is True
     assert entry.options[OPTION_ANALYSIS_DAYS] == 14
     assert entry.options[OPTION_COOLDOWN_DEFAULT] == 1800
 
 
-async def test_options_flow_preserves_panel_managed_specs(
+async def test_options_flow_never_touches_observations(
     hass: HomeAssistant,
 ) -> None:
     seed_behaviours(hass, end_of_work_day())
+    # What is observed lives in the panel; the settings form leaves data alone.
     entry = await setup_entry(
         hass,
         data={
@@ -116,12 +114,18 @@ async def test_options_flow_preserves_panel_managed_specs(
             CONF_EXCLUDE_ENTITIES: [KITCHEN],
         },
     )
+    data_before = dict(entry.data)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    # No subscription fields on the form anymore.
+    form_schema = result["data_schema"]
+    assert form_schema is not None
+    field_names = [key if isinstance(key, str) else key.schema for key in form_schema.schema]
+    assert CONF_ENTITIES not in field_names
+
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ENTITIES: ["binary_sensor", "switch"],
             OPTION_COOLDOWN_DEFAULT: 3600,
             OPTION_ANALYSIS_ENABLED: False,
             OPTION_ANALYSIS_DAYS: 7,
@@ -130,21 +134,7 @@ async def test_options_flow_preserves_panel_managed_specs(
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    # Explicit ids stay; exclusions (mutes) are not touched by this form.
-    assert entry.data[CONF_ENTITIES] == sorted(["binary_sensor", "switch", "light.desk"])
-    assert entry.data[CONF_EXCLUDE_ENTITIES] == [KITCHEN]
-
-
-async def test_options_flow_domains_default_to_none_for_legacy_ids(
-    hass: HomeAssistant,
-) -> None:
-    seed_behaviours(hass, end_of_work_day())
-    # Legacy/v0.1 data: only exact entity ids, no domains.
-    entry = await setup_entry(hass, data={CONF_ENTITIES: [OFFICE, KITCHEN]})
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    # The checklist starts empty; the exact ids are panel-managed and stay.
-    assert _form_default(result["data_schema"], CONF_ENTITIES) == []
+    assert dict(entry.data) == data_before
 
 
 async def test_corrupt_behaviours_yaml_delays_setup(hass: HomeAssistant) -> None:

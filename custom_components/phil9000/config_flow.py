@@ -1,11 +1,11 @@
-"""Config flow for PHIL9000: domain subscriptions + options.
+"""Config flow for PHIL9000: domain subscriptions + settings.
 
 This module is Home Assistant-facing (only ever imported inside HA).
 
 Setup asks for entity *domains* (a handful of toggles instead of hundreds of
-entities); the options flow re-edits that checklist plus analysis settings.
-Per-entity management — extra observations and mutes — lives in the panel,
-and saving the options form preserves whatever the panel has set.
+entities); the options flow holds the analysis/notify settings only — what
+gets observed (domains, per-entity adds and mutes) is managed live in the
+PHIL9000 panel.
 """
 
 from __future__ import annotations
@@ -42,7 +42,6 @@ from .const import (
     OPTION_COOLDOWN_DEFAULT,
     OPTION_NOTIFY_ENTITY,
 )
-from .subscriptions import split_specs
 
 
 def _domain_picker() -> SelectSelector:
@@ -105,17 +104,10 @@ class Phil9000OptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
+            # Settings only: what gets observed (domains, per-entity adds and
+            # mutes) is managed live in the PHIL9000 panel.
             agent_id = (user_input.get(OPTION_AGENT_ID) or "").strip() or None
             notify_entity = (user_input.get(OPTION_NOTIFY_ENTITY) or "").strip() or None
-            # The checklist only covers domains: explicit entity ids picked in
-            # the panel survive, and exclusions (mutes) are left alone.
-            _, current_entity_ids = split_specs(self.config_entry.data.get(CONF_ENTITIES, []))
-            observed = sorted(set(user_input.get(CONF_ENTITIES) or []) | current_entity_ids)
-            if observed:
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data={**self.config_entry.data, CONF_ENTITIES: observed},
-                )
             return self.async_create_entry(
                 title="",
                 data={
@@ -132,10 +124,8 @@ class Phil9000OptionsFlow(OptionsFlow):
             )
 
         current = self.config_entry.options
-        current_domains, _ = split_specs(self.config_entry.data.get(CONF_ENTITIES, []))
         schema = vol.Schema(
             {
-                vol.Required(CONF_ENTITIES, default=sorted(current_domains)): _domain_picker(),
                 # Selector defaults are validated by voluptuous: only supply
                 # one when a value is actually configured, otherwise the key
                 # stays absent (blank = unset).
