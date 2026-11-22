@@ -245,7 +245,7 @@ async def _async_ensure_ui(hass: HomeAssistant) -> bool:
             webcomponent_name=PANEL_WEBCOMPONENT,
             frontend_url_path=PANEL_URL_PATH,
             sidebar_title="PHIL9000",
-            sidebar_icon="mdi:brain",
+            sidebar_icon="mdi:eye",
             module_url=f"{STATIC_URL_PATH}/panel.js",
             require_admin=False,
         )

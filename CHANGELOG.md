@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.1 — 2026-11-22
+
+- Added brand images (`brand/icon.png`, `brand/[email protected]`): a HAL 9000
+  panel with a green eye, shown on the Home Assistant integration cards
+  (HA ≥ 2026.3 picks these up automatically).
+
+- Sidebar panel icon changed from `mdi:brain` to `mdi:eye`, echoing the logo.
+
 ## v0.3.0 — 2026-11-22
 
 ### Observing by entity type
