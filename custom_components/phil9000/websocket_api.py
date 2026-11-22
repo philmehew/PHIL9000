@@ -19,8 +19,8 @@ from .const import (
     CONF_EXCLUDE_ENTITIES,
     CONFIG_DIR,
     DOMAIN,
-    OBSERVABLE_DOMAIN_LABELS,
     OBSERVABLE_DOMAINS,
+    domain_label_parts,
 )
 from .models import BehaviourAction, BehaviourStatus
 from .subscriptions import is_valid_entity_id
@@ -246,14 +246,15 @@ def async_setup(hass: HomeAssistant) -> None:
             connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
             return
         subscriptions = runtime.subscriptions
+        domain_options = []
+        for domain in sorted(OBSERVABLE_DOMAINS):
+            label, hint = domain_label_parts(domain)
+            domain_options.append({"value": domain, "label": label, "hint": hint})
         connection.send_result(
             msg["id"],
             {
                 "domains": sorted(subscriptions.domains),
-                "domain_options": [
-                    {"value": domain, "label": OBSERVABLE_DOMAIN_LABELS.get(domain, domain)}
-                    for domain in sorted(OBSERVABLE_DOMAINS)
-                ],
+                "domain_options": domain_options,
                 "entities": sorted(subscriptions.entity_ids),
                 "muted": sorted(subscriptions.excluded),
                 "observed": _observed_entities(hass),

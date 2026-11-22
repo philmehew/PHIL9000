@@ -320,7 +320,7 @@ class Phil9000Panel extends HTMLElement {
     const checked = new Set(m.domains || []);
     domainList.innerHTML = (m.domain_options || [])
       .map(
-        (d) => `<label class="ent-row">
+        (d) => `<label class="ent-row" ${d.hint ? `title="${esc(d.hint)}"` : ""}>
           <input type="checkbox" data-act="set-domain" data-domain="${esc(d.value)}"
             ${checked.has(d.value) ? "checked" : ""} />
           <span>${esc(d.label)}</span>

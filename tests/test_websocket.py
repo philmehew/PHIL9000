@@ -462,9 +462,12 @@ async def test_monitoring_lists_domain_options_with_labels(
     client = await hass_ws_client(hass)
 
     out = await _send(client, 1, {"type": "phil9000/monitoring"})
-    options = {d["value"]: d["label"] for d in out["result"]["domain_options"]}
+    options = {d["value"]: d for d in out["result"]["domain_options"]}
     assert "binary_sensor" in options and "switch" in options
-    assert options["binary_sensor"]  # human label, not just the raw id
+    # Compact label for the checklist; the examples moved to a hover hint.
+    assert options["binary_sensor"]["label"] == "Binary sensors"
+    assert options["binary_sensor"]["hint"] == "motion, doors, presence"
+    assert options["switch"]["hint"] == ""
     assert out["result"]["domains"] == ["binary_sensor"]
 
 

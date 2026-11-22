@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.5 — 2026-11-22
+
+### Compact domain checklist with hover hints
+
+- Domain names in the panel's Domains card drop their bracketed examples
+  ("Binary sensors (motion, doors, presence)" → **Binary sensors**), which
+  was breaking the grid layout. The examples survive as a **hover tooltip**
+  on each row. New pure helper `domain_label_parts()` splits label from
+  hint; `phil9000/monitoring`'s `domain_options` now carry both fields.
+  The setup wizard's checklist keeps the full labels — it has the room.
+
 ## v0.4.4 — 2026-11-22
 
 ### Side-by-side management panels; settings-only integration form

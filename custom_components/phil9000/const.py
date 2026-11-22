@@ -5,6 +5,8 @@ Pure module — must not import Home Assistant (guarded by tests/test_purity.py)
 
 from __future__ import annotations
 
+import re
+
 DOMAIN = "phil9000"
 
 EVENT_BEHAVIOUR_DETECTED = f"{DOMAIN}_behaviour_detected"
@@ -60,6 +62,22 @@ OBSERVABLE_DOMAIN_LABELS = {
     "sensor": "Sensors (temperature, power, ...)",
     "switch": "Switches",
 }
+
+_LABEL_HINT_RE = re.compile(r"^(.*?)\s*\(([^)]*)\)$")
+
+
+def domain_label_parts(domain: str) -> tuple[str, str]:
+    """Split a domain label into display text and its parenthesized hint.
+
+    ``"Binary sensors (motion, doors, presence)"`` → ``("Binary sensors",
+    "motion, doors, presence")``. Compact labels suit checklists; the hint
+    belongs in a tooltip. Labels without a bracketed part return it whole
+    with an empty hint.
+    """
+    full = OBSERVABLE_DOMAIN_LABELS.get(domain, domain)
+    match = _LABEL_HINT_RE.match(full)
+    return (match.group(1), match.group(2)) if match else (full, "")
+
 
 # Config entry data
 CONF_ENTITIES = "entities"
