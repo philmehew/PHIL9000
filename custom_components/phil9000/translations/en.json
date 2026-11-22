@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Set up PHIL9000",
-        "description": "Choose the entities PHIL9000 should observe. It only watches at first — nothing is ever acted on until you confirm a learned behaviour.",
+        "description": "Choose the entities PHIL9000 should observe — type to search, pick from the dropdown. It only watches at first; nothing is ever acted on until you confirm a learned behaviour.",
         "data": {
           "entities": "Entities to observe"
         }

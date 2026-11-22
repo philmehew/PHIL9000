@@ -5,11 +5,14 @@ This module is Home Assistant-facing (only ever imported inside HA).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
-from homeassistant.core import callback
+from homeassistant.const import EntityCategory
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
@@ -17,9 +20,6 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
-    SelectSelector,
-    SelectSelectorConfig,
-    SelectSelectorMode,
 )
 
 from .analyser import DEFAULT_LOOKBACK_DAYS
@@ -27,12 +27,40 @@ from .const import (
     CONF_ENTITIES,
     DEFAULT_COOLDOWN_DEFAULT,
     DOMAIN,
+    OBSERVABLE_DOMAINS,
     OPTION_AGENT_ID,
     OPTION_ANALYSIS_DAYS,
     OPTION_ANALYSIS_ENABLED,
     OPTION_COOLDOWN_DEFAULT,
     OPTION_NOTIFY_ENTITY,
 )
+
+
+def _observation_candidates(hass: HomeAssistant, *, extra: Iterable[str] = ()) -> list[str]:
+    """Entity ids worth observing: observable domains minus hidden noise.
+
+    Skips disabled/hidden entities and diagnostic/config ones (firmware
+    sensors, buttons, ...). ``extra`` keeps already-selected ids visible even
+    if they no longer pass the filter.
+    """
+    registry = async_get_entity_registry(hass)
+    candidates = set(extra)
+    for entity_id in hass.states.async_entity_ids():
+        if entity_id.partition(".")[0] not in OBSERVABLE_DOMAINS:
+            continue
+        entry = registry.async_get(entity_id)
+        if entry is not None:
+            if entry.disabled_by is not None or entry.hidden_by is not None:
+                continue
+            if entry.entity_category in (EntityCategory.CONFIG, EntityCategory.DIAGNOSTIC):
+                continue
+        candidates.add(entity_id)
+    return sorted(candidates)
+
+
+def _entity_picker(candidates: list[str]) -> EntitySelector:
+    """Searchable multi-select entity picker."""
+    return EntitySelector(EntitySelectorConfig(include_entities=candidates, multiple=True))
 
 
 class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -61,17 +89,10 @@ class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
                     },
                 )
 
-        candidates = sorted(self.hass.states.async_entity_ids())
+        candidates = _observation_candidates(self.hass)
         schema = vol.Schema(
             {
-                vol.Required(CONF_ENTITIES): SelectSelector(
-                    SelectSelectorConfig(
-                        options=candidates,  # label == value
-                        multiple=True,
-                        mode=SelectSelectorMode.LIST,
-                        sort=True,
-                    )
-                ),
+                vol.Required(CONF_ENTITIES): _entity_picker(candidates),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -110,20 +131,15 @@ class Phil9000OptionsFlow(OptionsFlow):
             )
 
         current = self.config_entry.options
-        candidates = sorted(self.hass.states.async_entity_ids())
+        candidates = _observation_candidates(
+            self.hass, extra=self.config_entry.data.get(CONF_ENTITIES, [])
+        )
         schema = vol.Schema(
             {
                 vol.Optional(
                     CONF_ENTITIES,
                     default=sorted(self.config_entry.data.get(CONF_ENTITIES, [])),
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=candidates,  # label == value
-                        multiple=True,
-                        mode=SelectSelectorMode.LIST,
-                        sort=True,
-                    )
-                ),
+                ): _entity_picker(candidates),
                 # Selector defaults are validated by voluptuous: only supply
                 # one when a value is actually configured, otherwise the key
                 # stays absent (blank = unset).

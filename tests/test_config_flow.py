@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import pytest
+import voluptuous as vol
 from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
 
 from custom_components.phil9000.const import (
     CONF_ENTITIES,
@@ -89,6 +92,56 @@ async def test_options_flow_updates_entities_and_settings(
     assert entry.options[OPTION_ANALYSIS_ENABLED] is True
     assert entry.options[OPTION_ANALYSIS_DAYS] == 14
     assert entry.options[OPTION_COOLDOWN_DEFAULT] == 1800
+
+
+async def test_user_flow_picker_prefilters_noise(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    hass.states.async_set(OFFICE, "on")
+    hass.states.async_set("sun.sun", "above_horizon")
+    hass.states.async_set("update.some_addon", "on")
+    diag = entity_registry.async_get_or_create(
+        "sensor", "test", "firmware", entity_category=EntityCategory.DIAGNOSTIC
+    )
+    hidden = entity_registry.async_get_or_create(
+        "binary_sensor", "test", "motion", hidden_by=er.RegistryEntryHider.INTEGRATION
+    )
+    hass.states.async_set(diag.entity_id, "1.0")
+    hass.states.async_set(hidden.entity_id, "off")
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    assert result["data_schema"] is not None
+    picker = result["data_schema"].schema[vol.Required(CONF_ENTITIES)]
+    included = set(picker.config["include_entities"])
+    assert OFFICE in included
+    assert diag.entity_id not in included  # diagnostic
+    assert hidden.entity_id not in included  # hidden
+    assert "sun.sun" not in included  # non-observable domain
+    assert "update.some_addon" not in included
+
+
+async def test_options_flow_keeps_previously_selected(
+    hass: HomeAssistant,
+) -> None:
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    seed_behaviours(hass, end_of_work_day())
+    # An entity outside the observable domains configured earlier must stay
+    # visible in the picker so the user can review or remove it.
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        source=SOURCE_USER,
+        data={CONF_ENTITIES: ["counter.manual_count"]},
+        unique_id=DOMAIN,
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["data_schema"] is not None
+    picker = result["data_schema"].schema[vol.Optional(CONF_ENTITIES)]
+    assert "counter.manual_count" in picker.config["include_entities"]
 
 
 async def test_corrupt_behaviours_yaml_delays_setup(hass: HomeAssistant) -> None:

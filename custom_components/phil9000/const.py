@@ -14,6 +14,29 @@ SERVICE_CONFIRM_BEHAVIOUR = "confirm_behaviour"
 SERVICE_DISMISS_BEHAVIOUR = "dismiss_behaviour"
 SERVICE_RUN_ANALYSIS = "run_analysis"
 
+# Entity domains worth observing (config-flow picker prefilter). Chosen to
+# cover presence, activity and controllable-device signals while leaving out
+# system/utility domains that would bury the list (update, firmware, sun...).
+OBSERVABLE_DOMAINS = frozenset(
+    {
+        "appliance",
+        "binary_sensor",
+        "climate",
+        "cover",
+        "device_tracker",
+        "fan",
+        "humidifier",
+        "input_boolean",
+        "input_select",
+        "light",
+        "lock",
+        "media_player",
+        "person",
+        "sensor",
+        "switch",
+    }
+)
+
 # Config entry data
 CONF_ENTITIES = "entities"
 
