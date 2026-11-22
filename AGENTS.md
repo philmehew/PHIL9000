@@ -60,3 +60,18 @@ desk is powered down.
 
 Integration domain `phil9000`, events `phil9000_behaviour_detected`,
 services `phil9000.*` (e.g. `phil9000.confirm_pattern`).
+
+## Release process
+
+1. Bump `version` in `custom_components/phil9000/manifest.json`.
+2. Add a `## vX.Y.Z — <date>` section at the top of `CHANGELOG.md`.
+3. Commit (see the commit-message template in the global AGENTS.md), tag
+   `vX.Y.Z`, and push both: `git push origin main vX.Y.Z`.
+4. **Create a GitHub release from the tag** — HACS lists GitHub *releases*,
+   not tags; pushing the tag alone leaves HACS showing the old version:
+
+   ```sh
+   gh release create vX.Y.Z --title "vX.Y.Z" --notes "<changelog section>"
+   ```
+
+5. In Home Assistant: HACS → ⋮ → *Reload HACS*, then update PHIL9000.
