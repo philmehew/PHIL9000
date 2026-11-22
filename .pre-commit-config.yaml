@@ -1,0 +1,47 @@
+# Pre-commit hooks for PHIL9000 — run with prek (a Rust drop-in for pre-commit).
+#
+#   uv run prek install        # one-time: install the git hook
+#   uv run prek run --all-files
+#
+# Remote hooks need network access on first run; project checks run locally
+# through uv so they use the same toolchain as CI.
+
+repos:
+  # Standard hygiene checks.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-ast
+      - id: check-added-large-files
+      - id: check-builtin-literals
+      - id: check-case-conflict
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: debug-statements
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: uv-lock
+        name: uv.lock in sync with pyproject.toml
+        entry: uv lock --check
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check .
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+
+      - id: node-syntax
+        name: node --check (panel JS)
+        entry: node --check
+        language: system
+        files: ^custom_components/phil9000/frontend/.*\.js$
