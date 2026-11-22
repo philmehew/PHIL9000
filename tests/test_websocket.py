@@ -248,13 +248,47 @@ async def test_run_analysis_ws_error_and_result(
     assert out["success"] is False
     assert "recorder" in out["error"]["message"]
 
-    async def fake_run(hass_arg, entry, runtime):  # noqa: ANN001
+    async def fake_run(hass_arg, entry, runtime, **kwargs):  # noqa: ANN001
+        assert kwargs.get("trigger") == "manual"
         return {"refined": ["Refined one"], "new": ["Brand new"]}
 
     monkeypatch.setattr(analysis, "async_run_analysis", fake_run)
     out = await _send(client, 2, {"type": "phil9000/run_analysis"})
     assert out["success"] is True
     assert out["result"] == {"refined": ["Refined one"], "new": ["Brand new"]}
+
+
+async def test_analysis_log_ws_fetch_and_live_push(hass: HomeAssistant, hass_ws_client) -> None:
+    from custom_components.phil9000.analysis import _log_run
+
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.analysis_log.clear()  # the store persists across tests by design
+    client = await hass_ws_client(hass)
+
+    out = await _send(client, 1, {"type": "phil9000/analysis_log"})
+    assert out["success"] is True and out["result"]["entries"] == []
+
+    await client.send_json({"id": 2, "type": "phil9000/subscribe_analysis_log"})
+    assert (await client.receive_json())["success"] is True
+
+    _log_run(runtime, "info", "Run started (manual)")
+    push = await client.receive_json()
+    assert push["id"] == 2 and push["type"] == "event"
+    assert push["event"]["message"] == "Run started (manual)"
+    assert push["event"]["level"] == "info"
+
+    _log_run(runtime, "error", "Run failed: boom")
+    push = await client.receive_json()
+    assert push["event"]["level"] == "error"
+
+    # Fetch returns the buffer newest-first.
+    out = await _send(client, 3, {"type": "phil9000/analysis_log"})
+    assert [e["message"] for e in out["result"]["entries"]] == [
+        "Run failed: boom",
+        "Run started (manual)",
+    ]
 
 
 async def test_set_name_persists_and_flags_custom_name(hass: HomeAssistant, hass_ws_client) -> None:

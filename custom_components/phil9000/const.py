@@ -99,6 +99,9 @@ DEFAULT_COOLDOWN_DEFAULT = 3600
 # Behaviour definitions live in <HA config>/phil9000/behaviours.yaml
 CONFIG_DIR = DOMAIN
 BEHAVIOURS_FILE = "behaviours.yaml"
+# Ring buffer of recent analysis runs shown in the panel (newest last).
+ANALYSIS_LOG_FILE = "analysis_log.yaml"
+ANALYSIS_LOG_LIMIT = 50
 
 # hass.data flag: static assets + sidebar panel registered this run
 UI_REGISTERED_FLAG = f"{DOMAIN}_ui_registered"

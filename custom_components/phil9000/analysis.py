@@ -10,6 +10,7 @@ agent are injected-able for deterministic tests.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -21,7 +22,13 @@ from .analyser import (
     parse_analysis_reply,
     summarise_history,
 )
-from .const import CONF_ENTITIES, CONF_EXCLUDE_ENTITIES, OPTION_AGENT_ID, OPTION_ANALYSIS_DAYS
+from .const import (
+    ANALYSIS_LOG_LIMIT,
+    CONF_ENTITIES,
+    CONF_EXCLUDE_ENTITIES,
+    OPTION_AGENT_ID,
+    OPTION_ANALYSIS_DAYS,
+)
 from .notifier import async_notify
 from .subscriptions import Subscriptions, registry_is_noise
 
@@ -164,6 +171,22 @@ def _expand_specs(hass: HomeAssistant, specs: list[str], exclude: list[str]) -> 
     return Subscriptions(specs, exclude).expand(hass.states.async_entity_ids(), is_noise)
 
 
+def _log_run(runtime: Phil9000Runtime, level: str, message: str) -> None:
+    """Record one analysis-log line: system log, panel ring buffer, live push.
+
+    Entries newest-last, capped at ANALYSIS_LOG_LIMIT. The file write happens
+    once per run (see async_run_analysis) — a run is rare and short, and a
+    single awaited save avoids racing executor writes over the file.
+    """
+    line = "PHIL9000 analysis: %s"
+    (_LOGGER.error if level == "error" else _LOGGER.info)(line, message)
+    entry = {"at": datetime.now(UTC).isoformat(), "level": level, "message": message}
+    runtime.analysis_log.append(entry)
+    del runtime.analysis_log[:-ANALYSIS_LOG_LIMIT]
+    for subscriber in list(runtime.analysis_log_subscribers):
+        subscriber(dict(entry))
+
+
 async def async_run_analysis(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -172,6 +195,7 @@ async def async_run_analysis(
     history_provider: HistoryProvider | None = None,
     agent_call: AgentCall | None = None,
     notify: bool = True,
+    trigger: str = "manual",
 ) -> dict[str, list[str]]:
     """One analysis pass: history → prompt → agent → refined + new candidates.
 
@@ -179,17 +203,44 @@ async def async_run_analysis(
     any user-set name); new patterns enter as candidates. Confirmed and
     dismissed behaviours are never touched (enforced by the parser). Returns
     a summary ``{"refined": [names], "new": [names]}``; raises
-    AnalysisUnavailableError when the run cannot proceed.
+    AnalysisUnavailableError when the run cannot proceed. Each outcome is
+    also recorded in the panel's analysis log (``trigger`` says who started
+    it: "manual", "service" or "nightly").
     """
     if runtime.analysis_running:
+        _log_run(runtime, "error", "Skipped: another analysis run is already in progress")
         raise AnalysisUnavailableError("a PHIL9000 analysis run is already in progress")
     runtime.analysis_running = True
+    started = time.monotonic()
+    _log_run(runtime, "info", f"Run started ({trigger})")
     try:
-        return await _async_analysis_pass(
-            hass, entry, runtime, history_provider, agent_call, notify
-        )
+        try:
+            summary = await _async_analysis_pass(
+                hass, entry, runtime, history_provider, agent_call, notify
+            )
+        except AnalysisUnavailableError as err:
+            _log_run(runtime, "error", f"Run failed: {err}")
+            raise
+        except Exception as err:  # noqa: BLE001 — log, then let HA surface it
+            _log_run(runtime, "error", f"Run failed: {type(err).__name__}: {err}")
+            raise
+        details: list[str] = []
+        if summary["refined"]:
+            details.append(f"refined {', '.join(summary['refined'])}")
+        if summary["new"]:
+            details.append(f"proposed {', '.join(summary['new'])}")
+        outcome = "; ".join(details) if details else "no new convincing patterns"
+        _log_run(runtime, "info", f"Finished in {time.monotonic() - started:.0f}s — {outcome}")
+        return summary
     finally:
         runtime.analysis_running = False
+        if runtime.analysis_log_store is not None:
+            try:
+                await hass.async_add_executor_job(
+                    runtime.analysis_log_store.save, list(runtime.analysis_log)
+                )
+            except OSError:  # a log file must never sink a run
+                _LOGGER.warning("PHIL9000 could not persist the analysis log", exc_info=True)
 
 
 async def _async_analysis_pass(
@@ -213,6 +264,15 @@ async def _async_analysis_pass(
         raise AnalysisUnavailableError("no recorded history for the observed entities yet")
 
     existing = list(runtime.engine.behaviours.values())
+    total_events = sum(len(rows) for rows in events_by_entity.values())
+    live_entities = sum(1 for rows in events_by_entity.values() if rows)
+    known = "behaviour" if len(existing) == 1 else "behaviours"
+    _log_run(
+        runtime,
+        "info",
+        f"Collected {total_events} state changes from {live_entities} entities, "
+        f"{days}-day window, {len(existing)} known {known}",
+    )
     prompt = build_prompt(summarise_history(events_by_entity), existing)
     try:
         reply = await call(hass, entry.options.get(OPTION_AGENT_ID), prompt)
@@ -233,7 +293,6 @@ async def _async_analysis_pass(
     if result.new:
         parts.append(f"Proposed {len(result.new)} new candidate behaviour(s): {_names(result.new)}")
     message = " · ".join(parts) if parts else "No new convincing patterns this time."
-    _LOGGER.info("PHIL9000 analysis: %s", message)
     if notify:
         await async_notify(hass, entry, "PHIL9000 pattern analysis", message)
     return {

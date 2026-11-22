@@ -1,4 +1,4 @@
-"""YAML persistence for behaviour definitions.
+"""YAML persistence for behaviours and the analysis run log.
 
 Per the MVP plan, PHIL9000's own storage is limited to behaviours (the
 observation data lives in HA's recorder). YAML in the config directory is
@@ -7,6 +7,7 @@ user-editable and versionable; writes are atomic.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -15,6 +16,8 @@ from typing import Any
 import yaml
 
 from .models import Behaviour
+
+_LOGGER = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = 1
 
@@ -78,3 +81,38 @@ class BehaviourStore:
         behaviours = [b for b in self.load() if b.id != behaviour_id]
         self.save(behaviours)
         return behaviours
+
+
+class AnalysisLogStore:
+    """Loads and saves the recent analysis runs (plain dicts).
+
+    More forgiving than the behaviour store: the log is decoration, not
+    data — a missing or damaged file simply starts the buffer empty.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def load(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        try:
+            with self.path.open("r", encoding="utf-8") as fh:
+                raw: Any = yaml.safe_load(fh) or {}
+            entries = raw.get("runs", [])
+            return [e for e in entries if isinstance(e, dict) and e.get("at")]
+        except (OSError, yaml.YAMLError):
+            _LOGGER.warning("PHIL9000 ignoring unreadable analysis log %s", self.path)
+            return []
+
+    def save(self, entries: list[dict[str, Any]]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                yaml.safe_dump({"runs": entries}, fh, sort_keys=False, allow_unicode=True)
+            os.replace(tmp, self.path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.6 — 2026-11-22
+
+### Analysis log panel
+
+- A new **Analysis log** card sits under Recent activity and narrates every
+  LLM run: `Run started (manual/nightly/service)` → `Collected 312 state
+  changes from 14 entities, 7-day window, 3 known behaviours` →
+  `Finished in 8s — refined Dad clocks off; proposed Evening handoff`, or
+  why a run failed (`Run failed: no recorded history…`, shown in red). Rows
+  stream in live while a run is in flight, and the last 50 lines persist
+  across restarts in `.phil9000/analysis_log.yaml` — so you can see what
+  the nightly run did this morning.
+- New websocket commands: `phil9000/analysis_log` (fetch, newest first) and
+  `phil9000/subscribe_analysis_log` (live pushes).
+
 ## v0.4.5 — 2026-11-22
 
 ### Compact domain checklist with hover hints

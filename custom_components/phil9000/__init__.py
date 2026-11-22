@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from . import analysis, notifier, websocket_api
 from .const import (
+    ANALYSIS_LOG_FILE,
     ATTR_ACTIONS,
     ATTR_BEHAVIOUR_ID,
     ATTR_BEHAVIOUR_NAME,
@@ -50,7 +51,7 @@ from .models import (
     Observation,
 )
 from .subscriptions import Subscriptions, registry_is_noise
-from .yaml_store import BehaviourStore
+from .yaml_store import AnalysisLogStore, BehaviourStore
 
 __all__ = [
     "Behaviour",
@@ -92,6 +93,13 @@ class Phil9000Runtime:
     activity_subscribers: list[Callable[[dict], None]] = field(default_factory=list)
     # True while an LLM analysis pass is running (one run at a time).
     analysis_running: bool = False
+    # Ring buffer of recent analysis runs (oldest first), entries
+    # {"at": iso-utc, "level": "info"|"error", "message": str}: what the
+    # analyser did and what came back, shown in the panel's Analysis log.
+    analysis_log: list[dict] = field(default_factory=list)
+    analysis_log_store: AnalysisLogStore | None = None
+    # Panel subscribers for the live analysis log (same contract as above).
+    analysis_log_subscribers: list[Callable[[dict], None]] = field(default_factory=list)
 
     # -- mutations shared by services and the websocket API --------------
 
@@ -170,12 +178,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     is_noise = registry_is_noise(async_get_entity_registry(hass))
+    # Analysis log: small persisted ring buffer shown under the activity
+    # feed. Loaded leniently (never fails setup — it is decoration, not data).
+    analysis_log_store = AnalysisLogStore(hass.config.path(CONFIG_DIR, ANALYSIS_LOG_FILE))
     runtime = Phil9000Runtime(
         engine=engine,
         store=store,
         subscriptions=subscriptions,
         is_noise=is_noise,
         options_snapshot=dict(entry.options),
+        analysis_log=await hass.async_add_executor_job(analysis_log_store.load),
+        analysis_log_store=analysis_log_store,
     )
     hass.data[DOMAIN][entry.entry_id] = runtime
 
@@ -501,7 +514,7 @@ def _run_analysis_service_handler(hass: HomeAssistant, entry: ConfigEntry):  # n
         if runtime is None:
             raise ServiceValidationError("PHIL9000 is not loaded")
         try:
-            await analysis.async_run_analysis(hass, entry, runtime)
+            await analysis.async_run_analysis(hass, entry, runtime, trigger="service")
         except analysis.AnalysisUnavailableError as err:
             raise ServiceValidationError(str(err)) from err
 
@@ -512,7 +525,7 @@ async def _async_nightly_analysis(
     hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Runtime
 ) -> None:
     try:
-        await analysis.async_run_analysis(hass, entry, runtime)
+        await analysis.async_run_analysis(hass, entry, runtime, trigger="nightly")
     except analysis.AnalysisUnavailableError as err:
         _LOGGER.warning("Scheduled PHIL9000 analysis skipped: %s", err)
 

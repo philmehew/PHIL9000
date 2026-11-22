@@ -1,4 +1,4 @@
-"""Round-trip tests for models and the YAML behaviour store."""
+"""Round-trip tests for models and the YAML behaviour and analysis-log stores."""
 
 from datetime import time
 from pathlib import Path
@@ -12,7 +12,7 @@ from custom_components.phil9000.models import (
     BehaviourStep,
 )
 from custom_components.phil9000.seed import end_of_work_day
-from custom_components.phil9000.yaml_store import BehaviourStore
+from custom_components.phil9000.yaml_store import AnalysisLogStore, BehaviourStore
 
 
 def make_behaviour() -> Behaviour:
@@ -96,3 +96,34 @@ class TestYamlStore:
         text = (tmp_path / "behaviours.yaml").read_text()
         assert "End of work day" in text
         assert "binary_sensor.office_presence" in text
+
+
+class TestAnalysisLogStore:
+    def test_missing_file_starts_empty(self, tmp_path: Path) -> None:
+        assert AnalysisLogStore(tmp_path / "analysis_log.yaml").load() == []
+
+    def test_round_trip_preserves_order(self, tmp_path: Path) -> None:
+        store = AnalysisLogStore(tmp_path / "analysis_log.yaml")
+        entries = [
+            {"at": "2026-11-22T03:30:00+00:00", "level": "info", "message": "Run started"},
+            {"at": "2026-11-22T03:30:12+00:00", "level": "error", "message": "Run failed"},
+        ]
+        store.save(entries)
+        assert store.load() == entries
+
+    def test_damaged_file_is_tolerated(self, tmp_path: Path) -> None:
+        path = tmp_path / "analysis_log.yaml"
+        path.write_text("{{{not yaml", encoding="utf-8")
+        assert AnalysisLogStore(path).load() == []
+
+    def test_junk_entries_are_dropped(self, tmp_path: Path) -> None:
+        store = AnalysisLogStore(tmp_path / "analysis_log.yaml")
+        store.save([{"at": "x", "level": "info", "message": "ok"}])  # type: ignore[list-item]
+        path = tmp_path / "analysis_log.yaml"
+        path.write_text(
+            "runs:\n- at: 2026-11-22T03:30:00+00:00\n  level: info\n  message: ok\n- junk\n",
+            encoding="utf-8",
+        )
+        loaded = store.load()
+        assert len(loaded) == 1
+        assert loaded[0]["message"] == "ok"

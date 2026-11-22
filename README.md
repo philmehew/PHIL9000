@@ -87,6 +87,13 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   patterns. Everything is schema-validated; proposals arrive as candidates with **no
   actions**.
 
+- **Analysis log** under the activity feed: every LLM run reports itself — who
+  triggered it (panel button, service, nightly schedule), how much history it
+  collected, what it refined or proposed, how long it took, and why it failed when
+  it can't run. Rows stream in live while a run is in flight and the last 50 lines
+  survive restarts (`.phil9000/analysis_log.yaml`).
+  (`phil9000/analysis_log`, `phil9000/subscribe_analysis_log`)
+
 - **Accepted behaviours are hard-fixed**: the LLM may only refine candidates. Once you
   confirm (or dismiss) a behaviour, analysis passes leave it alone; genuinely different
   variants come back as new candidates. Names you set in the panel are also kept

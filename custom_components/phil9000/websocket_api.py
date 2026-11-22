@@ -195,6 +195,40 @@ def async_setup(hass: HomeAssistant) -> None:
         runtime.activity_subscribers.append(push)
         connection.subscriptions[msg["id"]] = unsubscribe
 
+    @websocket_api.websocket_command({"type": "phil9000/analysis_log"})
+    @websocket_api.async_response
+    async def handle_analysis_log(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Recent LLM analysis runs, newest first (the panel's Analysis log)."""
+        runtime = current_runtime(hass)
+        if runtime is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        connection.send_result(msg["id"], {"entries": list(reversed(runtime.analysis_log))})
+
+    @websocket_api.websocket_command({"type": "phil9000/subscribe_analysis_log"})
+    @websocket_api.async_response
+    async def handle_subscribe_analysis_log(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Live analysis log: one message per run event (start, progress, result)."""
+        runtime = current_runtime(hass)
+        if runtime is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        connection.send_result(msg["id"])
+
+        def push(entry: dict[str, Any]) -> None:
+            connection.send_message(websocket_api.event_message(msg["id"], entry))
+
+        def unsubscribe() -> None:
+            if push in runtime.analysis_log_subscribers:
+                runtime.analysis_log_subscribers.remove(push)
+
+        runtime.analysis_log_subscribers.append(push)
+        connection.subscriptions[msg["id"]] = unsubscribe
+
     @websocket_api.websocket_command({"type": "phil9000/run_analysis"})
     @websocket_api.async_response
     async def handle_run_analysis(
@@ -206,7 +240,7 @@ def async_setup(hass: HomeAssistant) -> None:
             connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
             return
         try:
-            summary = await analysis.async_run_analysis(hass, entry, runtime)
+            summary = await analysis.async_run_analysis(hass, entry, runtime, trigger="manual")
         except analysis.AnalysisUnavailableError as err:
             # Friendly expected failures: no recorder/agent, agent error, busy.
             connection.send_error(msg["id"], websocket_api.ERR_NOT_SUPPORTED, str(err))
@@ -405,6 +439,8 @@ def async_setup(hass: HomeAssistant) -> None:
         handle_set_actions,
         handle_activity,
         handle_subscribe_activity,
+        handle_analysis_log,
+        handle_subscribe_analysis_log,
         handle_run_analysis,
         handle_set_name,
         handle_monitoring,

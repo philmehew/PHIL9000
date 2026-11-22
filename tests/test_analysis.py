@@ -222,3 +222,106 @@ async def test_nightly_option_setups_cleanly(hass: HomeAssistant) -> None:
     seed_behaviours(hass, end_of_work_day())
     entry = await setup_entry(hass, options={OPTION_ANALYSIS_ENABLED: True})
     assert entry.entry_id in hass.data[DOMAIN]
+
+
+# -- the analysis run log (panel's "Analysis log" card) -------------------------
+
+
+async def test_analysis_log_records_a_readable_run(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.analysis_log.clear()  # the store is persisted across tests by design
+    pushes: list[dict] = []
+    runtime.analysis_log_subscribers.append(pushes.append)
+
+    await async_run_analysis(
+        hass,
+        entry,
+        runtime,
+        history_provider=_fake_history,
+        agent_call=FakeAgent(),
+        notify=False,
+    )
+    await hass.async_block_till_done()
+
+    messages = [e["message"] for e in runtime.analysis_log]
+    assert messages[0] == "Run started (manual)"
+    assert any(m.startswith("Collected 3 state changes from 2 entities") for m in messages)
+    assert messages[-1].startswith("Finished in ")
+    assert "proposed Evening handoff" in messages[-1]
+    assert all(e["level"] == "info" for e in runtime.analysis_log)
+    datetime.fromisoformat(runtime.analysis_log[-1]["at"])  # panel-parsable stamp
+
+    # Live push mirrors the buffer (start, progress, finish).
+    assert [e["message"] for e in pushes] == messages
+
+
+async def test_analysis_log_records_failures_as_errors(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.analysis_log.clear()
+
+    async def empty_history():
+        return {}
+
+    with pytest.raises(AnalysisUnavailableError):
+        await async_run_analysis(
+            hass,
+            entry,
+            runtime,
+            history_provider=empty_history,
+            agent_call=FakeAgent(),
+            notify=False,
+            trigger="nightly",
+        )
+
+    assert runtime.analysis_log[0]["message"] == "Run started (nightly)"
+    last = runtime.analysis_log[-1]
+    assert last["level"] == "error"
+    assert "no recorded history" in last["message"]
+    assert not runtime.analysis_running  # failed runs leave no stale guard
+
+
+async def test_analysis_log_survives_restart(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.analysis_log.clear()  # known starting state (the store persists by design)
+    await async_run_analysis(
+        hass,
+        entry,
+        runtime,
+        history_provider=_fake_history,
+        agent_call=FakeAgent(),
+        notify=False,
+    )
+    await hass.async_block_till_done()  # the run's log write is awaited in finally
+    assert runtime.analysis_log
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    fresh = hass.data[DOMAIN][entry.entry_id]
+    assert fresh.analysis_log is not runtime.analysis_log
+    assert [e["message"] for e in fresh.analysis_log] == [
+        e["message"] for e in runtime.analysis_log
+    ]
+
+
+async def test_analysis_log_buffer_is_capped(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.analysis_log_store = None  # memory only: this tests the ring buffer
+
+    from custom_components.phil9000.analysis import _log_run
+    from custom_components.phil9000.const import ANALYSIS_LOG_LIMIT
+
+    for i in range(ANALYSIS_LOG_LIMIT + 10):
+        _log_run(runtime, "info", f"line {i}")
+
+    assert len(runtime.analysis_log) == ANALYSIS_LOG_LIMIT
+    assert runtime.analysis_log[0]["message"] == "line 10"  # oldest dropped first
+    assert runtime.analysis_log[-1]["message"] == f"line {ANALYSIS_LOG_LIMIT + 9}"

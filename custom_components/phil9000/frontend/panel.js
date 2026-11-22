@@ -5,7 +5,8 @@
  *
  * Plain JS web component, no build step and no framework. Data flows over
  * the Home Assistant websocket API (phil9000/behaviours, phil9000/activity,
- * phil9000/subscribe_activity, phil9000/run_analysis, phil9000/set_status,
+ * phil9000/subscribe_activity, phil9000/analysis_log,
+ * phil9000/subscribe_analysis_log, phil9000/run_analysis, phil9000/set_status,
  * phil9000/set_name, phil9000/set_actions, phil9000/monitoring,
  * phil9000/set_observed, phil9000/set_domains, phil9000/mute_entity,
  * phil9000/unmute_entity); the panel refreshes on
@@ -113,6 +114,13 @@ const STYLE = `
                 flex: 0 0 86px; }
     .act-entity { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
     .act-change { color: var(--secondary-text-color); }
+    .log-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+    .log-list li { display: flex; gap: 10px; padding: 3px 0; align-items: baseline;
+                   border-bottom: 1px solid var(--divider-color); }
+    .log-list li:last-child { border-bottom: none; }
+    .log-list .log-msg { flex: 1 1 auto; overflow-wrap: anywhere; }
+    .log-list .log-error .log-msg { color: var(--error-color, #db4437); }
+    .log-list .empty { border-bottom: none; }
     .section-head { display: flex; align-items: baseline; gap: 12px; }
     .section-head .section { margin-bottom: 0; }
     .section-head button { font-size: 12px; padding: 3px 12px; }
@@ -164,6 +172,7 @@ class Phil9000Panel extends HTMLElement {
     this._pending = [];
     this._analysing = false;
     this._analysisNote = null;
+    this._analysisLog = null; // entries from phil9000/analysis_log (newest first)
     this._monitoring = null;
     this._entityFilter = "";
 
@@ -176,6 +185,10 @@ class Phil9000Panel extends HTMLElement {
           <div class="section-head"><h2 class="section">Recent activity</h2>
             <button class="secondary" data-act="pause">Pause</button></div>
           <div id="activity"><p class="empty">Loading…</p></div>
+          <h2 class="section">Analysis log</h2>
+          <div class="card"><ul class="log-list" id="analysis-log">
+            <li class="empty">Loading…</li>
+          </ul></div>
         </div>
         <div id="manage-col">
           <h2 class="section">Domains</h2>
@@ -234,8 +247,16 @@ class Phil9000Panel extends HTMLElement {
       },
       { type: "phil9000/subscribe_activity" },
     ).catch(() => {});
+    hass.connection.subscribeMessage(
+      (entry) => {
+        this._analysisLog = [entry, ...(this._analysisLog || [])].slice(0, 50);
+        this._renderAnalysisLog();
+      },
+      { type: "phil9000/subscribe_analysis_log" },
+    ).catch(() => {});
     this._refresh();
     this._reloadActivity();
+    this._loadAnalysisLog();
     this._loadMonitoring();
   }
 
@@ -274,6 +295,38 @@ class Phil9000Panel extends HTMLElement {
         </li>`,
       )
       .join("")}</ul></div>`;
+  }
+
+  async _loadAnalysisLog() {
+    try {
+      const result = await this._hass.connection.sendMessagePromise({
+        type: "phil9000/analysis_log",
+      });
+      this._analysisLog = result.entries || [];
+    } catch (err) {
+      this._analysisLog = [];
+    }
+    this._renderAnalysisLog();
+  }
+
+  _renderAnalysisLog() {
+    const el = this.querySelector("#analysis-log");
+    if (!el) return;
+    const entries = this._analysisLog || [];
+    if (entries.length === 0) {
+      el.innerHTML =
+        `<li class="empty">No analysis runs yet — press “Analyse now” above, ` +
+        `or wait for the nightly run.</li>`;
+      return;
+    }
+    el.innerHTML = entries
+      .map(
+        (e) => `<li class="log-${e.level === "error" ? "error" : "info"}">
+          <span class="act-time">${esc(formatClock(e.at))}</span>
+          <span class="log-msg">${esc(e.message)}</span>
+        </li>`,
+      )
+      .join("");
   }
 
   _togglePause() {
