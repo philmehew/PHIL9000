@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.2 — 2026-11-22
+
+### Pause the feed, manage entities with checkboxes
+
+- **Pause / Resume** beside the Recent activity title: while paused, live
+  rows buffer instead of scrolling the list out from under you (the button
+  shows how many are waiting); rows stay clickable, so muting a chatty
+  entity mid-stream finally works. Resume prepends the buffered rows.
+
+- **Entity browser** in the Monitoring section: a search box plus a
+  scrollable checkbox list of every entity — tick to observe (unmute, or
+  add as an explicit entity if its domain isn't subscribed), untick to mute.
+  `added`/`muted` chips explain each state. New `phil9000/set_observed`
+  command; unobserved entities untick to nothing (no phantom mutes).
+
+- The integration options' extra-entity and exclusion fields are now
+  **searchable multi-select lists** (with free-text entry for ids that have
+  no state yet) instead of an entity dropdown that only ever picked one.
+
+- The Recent activity card is capped at half the panel width so long entity
+  ids stop pushing the ⊘ button around on wide screens.
+
 ## v0.4.1 — 2026-11-22
 
 ### Mute noisy entities, right from the feed

@@ -7,8 +7,8 @@
  * the Home Assistant websocket API (phil9000/behaviours, phil9000/activity,
  * phil9000/subscribe_activity, phil9000/run_analysis, phil9000/set_status,
  * phil9000/set_name, phil9000/set_actions, phil9000/monitoring,
- * phil9000/mute_entity, phil9000/unmute_entity); the panel refreshes on
- * phil9000_behaviour_detected.
+ * phil9000/set_observed, phil9000/mute_entity, phil9000/unmute_entity); the
+ * panel refreshes on phil9000_behaviour_detected.
  */
 
 const STATUS_RANK = { confirmed: 0, candidate: 1, dismissed: 2 };
@@ -112,6 +112,10 @@ const STYLE = `
                 flex: 0 0 86px; }
     .act-entity { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
     .act-change { color: var(--secondary-text-color); }
+    .section-head { display: flex; align-items: baseline; gap: 12px; }
+    .section-head .section { margin-bottom: 0; }
+    .section-head button { font-size: 12px; padding: 3px 12px; }
+    #activity .card { width: 50%; min-width: 340px; }
     .mute-btn { flex: 0 0 auto; margin-left: auto; padding: 0 9px; font-size: 13px;
                 line-height: 1.5; opacity: .65; }
     .mute-btn:hover { opacity: 1; }
@@ -119,10 +123,20 @@ const STYLE = `
             border: 1px solid var(--divider-color); border-radius: 6px;
             padding: 1px 7px; margin: 1px 2px; font-size: 12px;
             font-family: monospace; }
-    .muted-row { display: flex; gap: 10px; align-items: center;
-                 border-bottom: 1px solid var(--divider-color); padding: 4px 0; }
-    .muted-row:last-child { border-bottom: none; }
-    .muted-row button { margin-left: auto; font-size: 12px; padding: 3px 10px; }
+    .entity-search { width: 100%; box-sizing: border-box; padding: 7px 10px;
+                     border: 1px solid var(--divider-color); border-radius: 8px;
+                     background: var(--card-background-color);
+                     color: var(--primary-text-color); font-size: 13px;
+                     margin: 8px 0; }
+    .ent-list { max-height: 340px; overflow-y: auto; border-top: 1px solid
+                var(--divider-color); }
+    .ent-row { display: flex; gap: 8px; align-items: center; font-size: 13px;
+               padding: 3px 2px; cursor: pointer; }
+    .ent-row span { font-family: monospace; overflow-wrap: anywhere; }
+    .ent-row input[type="checkbox"] { flex: 0 0 auto; cursor: pointer; }
+    .mini-chip { font-size: 10px; padding: 1px 6px; border-radius: 8px;
+                 background: var(--divider-color); color: var(--secondary-text-color); }
+    .mini-chip.muted { background: rgba(192,57,43,.14); color: #c0392b; }
     .name-input { font-size: 16px; padding: 4px 8px; width: 300px; max-width: 70%;
                   border: 1px solid var(--divider-color); border-radius: 6px;
                   background: var(--card-background-color);
@@ -144,18 +158,38 @@ class Phil9000Panel extends HTMLElement {
     this._renaming = null; // behaviour_id while its name input is open
     this._activity = [];
     this._activityHint = "";
+    this._paused = false; // live rows buffer while the user inspects the feed
+    this._pending = [];
     this._analysing = false;
     this._analysisNote = null;
     this._monitoring = null;
+    this._entityFilter = "";
 
     this.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
       <button data-act="analyse" ${this._analysing ? "disabled" : ""}>Analyse now</button>
       <button class="secondary" data-act="refresh">Refresh</button></header>
       <p class="meta"></p><div id="banner"></div>
-      <h2 class="section">Recent activity</h2><div id="activity"><p class="empty">Loading…</p></div>
-      <h2 class="section">Monitoring</h2><div id="monitoring"></div>
+      <div class="section-head"><h2 class="section">Recent activity</h2>
+        <button class="secondary" data-act="pause">Pause</button></div>
+      <div id="activity"><p class="empty">Loading…</p></div>
+      <h2 class="section">Monitoring</h2>
+      <div id="monitoring"><div class="card">
+        <div class="lines" id="mon-summary"></div>
+        <input class="entity-search" placeholder="Search entities — tick to observe, untick to mute…" />
+        <div class="ent-list" id="entity-list"><p class="empty">Loading…</p></div>
+      </div></div>
       <h2 class="section">Behaviours</h2><div id="body"><p class="empty">Loading…</p></div>`;
     this.addEventListener("click", (ev) => this._onClick(ev));
+    this.addEventListener("input", (ev) => {
+      if (ev.target.classList.contains("entity-search")) {
+        this._entityFilter = ev.target.value.trim().toLowerCase();
+        this._renderEntityList();
+      }
+    });
+    this.addEventListener("change", (ev) => {
+      const box = ev.target.closest("input[data-act='set-observed']");
+      if (box) this._setObserved(box.dataset.entity, box.checked);
+    });
     this.addEventListener("keydown", (ev) => {
       if (ev.target.classList.contains("name-input")) {
         if (ev.key === "Enter") ev.target.closest(".card").querySelector('[data-act="save-name"]').click();
@@ -172,6 +206,12 @@ class Phil9000Panel extends HTMLElement {
     );
     hass.connection.subscribeMessage(
       (row) => {
+        if (this._paused) {
+          this._pending.unshift(row);
+          this._pending = this._pending.slice(0, 250);
+          this._updatePauseBtn();
+          return;
+        }
         this._activity.unshift(row);
         this._activity = this._activity.slice(0, 25);
         this._activityHint = "";
@@ -221,6 +261,24 @@ class Phil9000Panel extends HTMLElement {
       .join("")}</ul></div>`;
   }
 
+  _togglePause() {
+    this._paused = !this._paused;
+    if (!this._paused && this._pending.length) {
+      this._activity = [...this._pending, ...this._activity].slice(0, 25);
+      this._pending = [];
+      this._renderActivity();
+    }
+    this._updatePauseBtn();
+  }
+
+  _updatePauseBtn() {
+    const btn = this.querySelector('[data-act="pause"]');
+    if (!btn) return;
+    btn.textContent = this._paused
+      ? `Resume${this._pending.length ? ` (${this._pending.length})` : ""}`
+      : "Pause";
+  }
+
   async _loadMonitoring() {
     try {
       this._monitoring = await this._hass.connection.sendMessagePromise({
@@ -235,57 +293,64 @@ class Phil9000Panel extends HTMLElement {
   }
 
   _renderMonitoring() {
-    const el = this.querySelector("#monitoring");
-    if (!el) return;
+    const summary = this.querySelector("#mon-summary");
+    if (!summary) return;
     const m = this._monitoring;
     if (!m) {
-      el.innerHTML = "";
+      summary.textContent = "";
       return;
     }
     const chips = (items) => items.map((v) => `<code class="chip">${esc(v)}</code>`).join("");
-    const muted = m.muted || [];
-    el.innerHTML = `<div class="card">
-      <div class="lines">Domains: ${(m.domains || []).length ? chips(m.domains) : "none"}</div>
-      ${(m.entities || []).length ? `<div class="lines">Extra entities: ${chips(m.entities)}</div>` : ""}
-      <div class="lines">Observing ${(m.observed || []).length} entities right now. Add or remove
-        domains in the integration options (Settings → Integrations → PHIL9000 → Configure).</div>
-      <div class="lines">Muted (${muted.length})${muted.length ? " — no observations, feed rows or analysis:" : ""}</div>
-      ${
-        muted.length
-          ? muted
-              .map(
-                (e) => `<div class="muted-row"><span class="act-entity">${esc(e)}</span>
-                <button class="secondary" data-act="unmute" data-entity="${esc(e)}" ${this._busy ? "disabled" : ""}>Unmute</button>
-              </div>`,
-              )
-              .join("")
-          : `<div class="lines">Nothing muted. Use ⊘ on an activity row to silence a noisy entity.</div>`
+    summary.innerHTML =
+      `Domains: ${(m.domains || []).length ? chips(m.domains) : "none"} · ` +
+      `observing ${(m.observed || []).length} entities · ` +
+      `${(m.muted || []).length} muted. Whole domains: Settings → Integrations → ` +
+      `PHIL9000 → Configure.`;
+    this._renderEntityList();
+  }
+
+  _renderEntityList() {
+    const el = this.querySelector("#entity-list");
+    if (!el || !this._monitoring) return;
+    const m = this._monitoring;
+    const observed = new Set(m.observed || []);
+    const explicit = new Set(m.entities || []);
+    const muted = new Set(m.muted || []);
+    const all = Object.keys(this._hass.states).sort();
+    const matches = this._entityFilter
+      ? all.filter((e) => e.includes(this._entityFilter))
+      : all;
+    const shown = matches.slice(0, 300);
+    el.innerHTML =
+      shown
+        .map(
+          (e) => `<label class="ent-row">
+            <input type="checkbox" data-act="set-observed" data-entity="${esc(e)}"
+              ${observed.has(e) ? "checked" : ""} />
+            <span>${esc(e)}</span>
+            ${explicit.has(e) ? '<code class="mini-chip">added</code>' : ""}
+            ${muted.has(e) ? '<code class="mini-chip muted">muted</code>' : ""}
+          </label>`,
+        )
+        .join("") +
+      (matches.length > shown.length
+        ? `<div class="lines">+${matches.length - shown.length} more — keep typing</div>`
+        : "");
+  }
+
+  async _setObserved(entityId, observed) {
+    try {
+      await this._hass.connection.sendMessagePromise({
+        type: "phil9000/set_observed",
+        entity_id: entityId,
+        observed,
+      });
+      if (!observed) {
+        // The backend stopped observing it; clear its rows from feed + buffer.
+        this._activity = this._activity.filter((r) => r.entity_id !== entityId);
+        this._pending = this._pending.filter((r) => r.entity_id !== entityId);
+        this._renderActivity();
       }
-    </div>`;
-  }
-
-  async _mute(entityId) {
-    try {
-      await this._hass.connection.sendMessagePromise({
-        type: "phil9000/mute_entity",
-        entity_id: entityId,
-      });
-      // The backend stops observing it immediately; clear its rows too.
-      this._activity = this._activity.filter((r) => r.entity_id !== entityId);
-      this._renderActivity();
-    } catch (err) {
-      this._error = err.message || String(err);
-      this._render();
-    }
-    this._loadMonitoring();
-  }
-
-  async _unmute(entityId) {
-    try {
-      await this._hass.connection.sendMessagePromise({
-        type: "phil9000/unmute_entity",
-        entity_id: entityId,
-      });
     } catch (err) {
       this._error = err.message || String(err);
       this._render();
@@ -400,8 +465,8 @@ class Phil9000Panel extends HTMLElement {
       return this._reloadActivity();
     }
     if (act === "analyse") return this._analyse();
-    if (act === "mute") return this._mute(btn.dataset.entity);
-    if (act === "unmute") return this._unmute(btn.dataset.entity);
+    if (act === "pause") return this._togglePause();
+    if (act === "mute") return this._setObserved(btn.dataset.entity, false);
     if (act === "rename") {
       this._renaming = id;
       return this._render();

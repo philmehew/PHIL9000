@@ -366,3 +366,87 @@ async def test_mute_rejects_invalid_entity_id(hass: HomeAssistant, hass_ws_clien
     out = await _send(client, 1, {"type": "phil9000/mute_entity", "entity_id": "not an id"})
     assert out["success"] is False
     assert out["error"]["code"] == "invalid_format"
+
+
+# -- set_observed (the panel's entity browser) ---------------------------------
+
+
+async def test_set_observed_untick_drops_spec_and_mutes(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    entry = await setup_entry(hass)  # explicit specs: [OFFICE, KITCHEN]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    client = await hass_ws_client(hass)
+
+    out = await _send(
+        client, 1, {"type": "phil9000/set_observed", "entity_id": OFFICE, "observed": False}
+    )
+    assert out["success"] is True, out
+    assert entry.data[CONF_ENTITIES] == [KITCHEN]
+    assert entry.data[CONF_EXCLUDE_ENTITIES] == [OFFICE]
+    assert not runtime.subscriptions.matches(OFFICE)
+    assert runtime.subscriptions.matches(KITCHEN)
+
+
+async def test_set_observed_tick_covers_unsubscribed_entity(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    client = await hass_ws_client(hass)
+    hass.states.async_set("sensor.hallway_temp", "19")
+
+    out = await _send(
+        client,
+        1,
+        {"type": "phil9000/set_observed", "entity_id": "sensor.hallway_temp", "observed": True},
+    )
+    assert out["success"] is True, out
+    assert "sensor.hallway_temp" in entry.data[CONF_ENTITIES]
+    assert runtime.subscriptions.matches("sensor.hallway_temp")
+
+    # Re-ticking an already-covered entity changes nothing (still no domain
+    # spec here: the default entry uses exact ids).
+    out = await _send(
+        client, 2, {"type": "phil9000/set_observed", "entity_id": KITCHEN, "observed": True}
+    )
+    assert out["result"]["explicit"] == sorted([KITCHEN, OFFICE, "sensor.hallway_temp"])
+
+
+async def test_set_observed_untick_mutes_domain_covered_entity(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    entry = await setup_entry(hass, data={CONF_ENTITIES: ["binary_sensor"]})
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    client = await hass_ws_client(hass)
+
+    out = await _send(
+        client, 1, {"type": "phil9000/set_observed", "entity_id": OFFICE, "observed": False}
+    )
+    assert out["success"] is True, out
+    # Removing the domain spec would nuke every sensor: muting is the way.
+    assert entry.data[CONF_ENTITIES] == ["binary_sensor"]
+    assert entry.data[CONF_EXCLUDE_ENTITIES] == [OFFICE]
+    assert not runtime.subscriptions.matches(OFFICE)
+
+    # Re-tick unmutes without leaving a redundant explicit spec behind.
+    out = await _send(
+        client, 2, {"type": "phil9000/set_observed", "entity_id": OFFICE, "observed": True}
+    )
+    assert out["result"]["muted"] == []
+    assert entry.data[CONF_ENTITIES] == ["binary_sensor"]
+    assert CONF_EXCLUDE_ENTITIES not in entry.data
+
+
+async def test_set_observed_untick_of_unobserved_entity_is_noop(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    entry = await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    out = await _send(
+        client, 1, {"type": "phil9000/set_observed", "entity_id": "sensor.other", "observed": False}
+    )
+    assert out["success"] is True, out
+    assert out["result"]["muted"] == []  # no phantom mute recorded
+    assert CONF_EXCLUDE_ENTITIES not in entry.data

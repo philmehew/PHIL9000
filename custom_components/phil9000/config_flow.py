@@ -60,9 +60,22 @@ def _domain_picker() -> SelectSelector:
     )
 
 
-def _entity_search() -> EntitySelector:
-    """Searchable entity picker over all entities (HA's standard widget)."""
-    return EntitySelector(EntitySelectorConfig(multiple=True))
+def _entity_search(entity_ids: list[str]) -> SelectSelector:
+    """Searchable multi-select over the entities that exist right now.
+
+    (An EntitySelector renders as a single-pick dropdown in practice.) A
+    multiple select with custom values gives a checkbox list with the
+    frontend's built-in search, and still allows typing an id that has no
+    state yet.
+    """
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=sorted(set(entity_ids)),
+            multiple=True,
+            custom_value=True,
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
 
 
 class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -146,18 +159,25 @@ class Phil9000OptionsFlow(OptionsFlow):
         current_domains, current_entity_ids = split_specs(
             self.config_entry.data.get(CONF_ENTITIES, [])
         )
+        # Pickers list what exists; the chosen ids (which always accompany
+        # them below) also stay selectable in case they lost their state.
+        entity_choices = (
+            list(self.hass.states.async_entity_ids())
+            + list(current_entity_ids)
+            + list(self.config_entry.data.get(CONF_EXCLUDE_ENTITIES, []))
+        )
         schema = vol.Schema(
             {
                 vol.Required(CONF_ENTITIES, default=sorted(current_domains)): _domain_picker(),
                 vol.Optional(
                     CONF_ENTITY_IDS,
                     default=sorted(current_entity_ids) or vol.UNDEFINED,
-                ): _entity_search(),
+                ): _entity_search(entity_choices),
                 vol.Optional(
                     CONF_EXCLUDE_ENTITIES,
                     default=sorted(self.config_entry.data.get(CONF_EXCLUDE_ENTITIES, []))
                     or vol.UNDEFINED,
-                ): _entity_search(),
+                ): _entity_search(entity_choices),
                 # Selector defaults are validated by voluptuous: only supply
                 # one when a value is actually configured, otherwise the key
                 # stays absent (blank = unset).

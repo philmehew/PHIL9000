@@ -15,6 +15,7 @@ from .activity import DEFAULT_LIMIT
 from .const import (
     ATTR_BEHAVIOUR_ID,
     BEHAVIOURS_FILE,
+    CONF_ENTITIES,
     CONF_EXCLUDE_ENTITIES,
     CONFIG_DIR,
     DOMAIN,
@@ -306,6 +307,58 @@ def async_setup(hass: HomeAssistant) -> None:
             await hass.async_block_till_done()
         connection.send_result(msg["id"], {"muted": sorted(excluded)})
 
+    @websocket_api.websocket_command(
+        {
+            "type": "phil9000/set_observed",
+            vol.Required("entity_id"): str,
+            vol.Required("observed"): bool,
+        }
+    )
+    @websocket_api.async_response
+    async def handle_set_observed(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Tick-box semantics for the panel's entity browser.
+
+        observed=True  → unmute, and make sure the entity is covered (added as
+                         an explicit spec when its domain isn't subscribed).
+        observed=False → if currently observed: drop any explicit spec and
+                         mute it (domain coverage alone would keep it live).
+        Anything not observed stays untouched (no phantom mutes).
+        """
+        runtime = current_runtime(hass)
+        entry = _entry(hass)
+        if runtime is None or entry is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        entity_id = msg["entity_id"].strip().lower()
+        if not is_valid_entity_id(entity_id):
+            connection.send_error(
+                msg["id"], websocket_api.ERR_INVALID_FORMAT, f"{entity_id!r} is not an entity id"
+            )
+            return
+        specs = set(entry.data.get(CONF_ENTITIES, ()))
+        excluded = set(entry.data.get(CONF_EXCLUDE_ENTITIES, ()))
+        if msg["observed"]:
+            excluded.discard(entity_id)
+            if entity_id not in specs and entity_id.partition(".")[0] not in specs:
+                specs.add(entity_id)
+        elif runtime.subscriptions.matches(entity_id, runtime.is_noise):
+            specs.discard(entity_id)
+            excluded.add(entity_id)
+        data = {**entry.data, CONF_ENTITIES: sorted(specs)}
+        if excluded:
+            data[CONF_EXCLUDE_ENTITIES] = sorted(excluded)
+        else:
+            data.pop(CONF_EXCLUDE_ENTITIES, None)
+        if data != dict(entry.data):
+            hass.config_entries.async_update_entry(entry, data=data)
+            await hass.async_block_till_done()  # listener swaps subscriptions first
+        connection.send_result(
+            msg["id"],
+            {"muted": sorted(excluded), "explicit": sorted(s for s in specs if "." in s)},
+        )
+
     for handler in (
         handle_behaviours,
         handle_set_status,
@@ -317,5 +370,6 @@ def async_setup(hass: HomeAssistant) -> None:
         handle_monitoring,
         handle_mute_entity,
         handle_unmute_entity,
+        handle_set_observed,
     ):
         websocket_api.async_register_command(hass, handler)
