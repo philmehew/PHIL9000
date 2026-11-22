@@ -1,8 +1,19 @@
 # Changelog
 
+## v0.3.2 — 2026-11-22
+
+- Brand icon refined: the eye now has a round silver bezel (was a copper
+  oval) and its reflections sit across the upper third of the lens, as on
+  the real HAL dome.
+
+- Sidebar panel icon changed from `mdi:eye` to `mdi:eye-circle`.
+
+- Fixed the hi-res brand image filename: Home Assistant looks for
+  `brand/icon@2x.png`.
+
 ## v0.3.1 — 2026-11-22
 
-- Added brand images (`brand/icon.png`, `brand/[email protected]`): a HAL 9000
+- Added brand images (`brand/icon.png`, `brand/icon@2x.png`): a HAL 9000
   panel with a green eye, shown on the Home Assistant integration cards
   (HA ≥ 2026.3 picks these up automatically).
 
