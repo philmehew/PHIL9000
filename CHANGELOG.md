@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.3 — 2026-11-22
+
+### Entity management fully in the panel
+
+- The Monitoring section gained the **domain subscription checklist** (tick
+  whole domains on/off, live, no reload) above the searchable entity list.
+  The old domain chips row is gone — the checklist is the display now.
+  New `phil9000/set_domains` command.
+
+- The integration options form dropped its "extra entities" and "never
+  observe" fields — per-entity management belongs in the panel now. The
+  form keeps the domain checklist and the analysis/notify settings, and
+  saving it **preserves** explicit entity ids and mutes made from the
+  panel instead of overwriting them.
+
 ## v0.4.2 — 2026-11-22
 
 ### Pause the feed, manage entities with checkboxes

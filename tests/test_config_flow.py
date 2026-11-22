@@ -10,7 +10,6 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.phil9000.const import (
     CONF_ENTITIES,
-    CONF_ENTITY_IDS,
     CONF_EXCLUDE_ENTITIES,
     DEFAULT_OBSERVABLE_DOMAINS,
     DOMAIN,
@@ -79,11 +78,11 @@ async def test_user_flow_requires_domains_then_recovers(
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
-async def test_options_flow_updates_entities_and_settings(
+async def test_options_flow_updates_domains_and_settings(
     hass: HomeAssistant,
 ) -> None:
     seed_behaviours(hass, end_of_work_day())
-    entry = await setup_entry(hass)
+    entry = await setup_entry(hass)  # explicit specs: [OFFICE, KITCHEN]
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
@@ -91,7 +90,6 @@ async def test_options_flow_updates_entities_and_settings(
         result["flow_id"],
         {
             CONF_ENTITIES: ["binary_sensor"],
-            CONF_ENTITY_IDS: [KITCHEN],
             OPTION_COOLDOWN_DEFAULT: 1800,
             OPTION_ANALYSIS_ENABLED: True,
             OPTION_ANALYSIS_DAYS: 14,
@@ -100,26 +98,30 @@ async def test_options_flow_updates_entities_and_settings(
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    # Domain + extra id merge into one sorted subscription list.
-    assert entry.data[CONF_ENTITIES] == sorted(["binary_sensor", KITCHEN])
+    # The checklist adds domains; per-entity specs (panel-managed) survive.
+    assert entry.data[CONF_ENTITIES] == sorted(["binary_sensor", OFFICE, KITCHEN])
     assert entry.options[OPTION_ANALYSIS_ENABLED] is True
     assert entry.options[OPTION_ANALYSIS_DAYS] == 14
     assert entry.options[OPTION_COOLDOWN_DEFAULT] == 1800
 
 
-async def test_options_flow_merges_domains_extra_and_excludes(
+async def test_options_flow_preserves_panel_managed_specs(
     hass: HomeAssistant,
 ) -> None:
     seed_behaviours(hass, end_of_work_day())
-    entry = await setup_entry(hass, data={CONF_ENTITIES: ["binary_sensor"]})
+    entry = await setup_entry(
+        hass,
+        data={
+            CONF_ENTITIES: ["binary_sensor", "light.desk"],
+            CONF_EXCLUDE_ENTITIES: [KITCHEN],
+        },
+    )
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
             CONF_ENTITIES: ["binary_sensor", "switch"],
-            CONF_ENTITY_IDS: ["light.desk"],
-            CONF_EXCLUDE_ENTITIES: [KITCHEN],
             OPTION_COOLDOWN_DEFAULT: 3600,
             OPTION_ANALYSIS_ENABLED: False,
             OPTION_ANALYSIS_DAYS: 7,
@@ -128,13 +130,12 @@ async def test_options_flow_merges_domains_extra_and_excludes(
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    # Domains and extra ids merge into one sorted subscription list;
-    # exclusions are stored separately.
+    # Explicit ids stay; exclusions (mutes) are not touched by this form.
     assert entry.data[CONF_ENTITIES] == sorted(["binary_sensor", "switch", "light.desk"])
     assert entry.data[CONF_EXCLUDE_ENTITIES] == [KITCHEN]
 
 
-async def test_options_flow_keeps_legacy_entity_ids_visible(
+async def test_options_flow_domains_default_to_none_for_legacy_ids(
     hass: HomeAssistant,
 ) -> None:
     seed_behaviours(hass, end_of_work_day())
@@ -142,9 +143,8 @@ async def test_options_flow_keeps_legacy_entity_ids_visible(
     entry = await setup_entry(hass, data={CONF_ENTITIES: [OFFICE, KITCHEN]})
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    # Domains default empty; the exact ids surface in the refinement field.
+    # The checklist starts empty; the exact ids are panel-managed and stay.
     assert _form_default(result["data_schema"], CONF_ENTITIES) == []
-    assert _form_default(result["data_schema"], CONF_ENTITY_IDS) == sorted([OFFICE, KITCHEN])
 
 
 async def test_corrupt_behaviours_yaml_delays_setup(hass: HomeAssistant) -> None:

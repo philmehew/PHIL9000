@@ -7,8 +7,9 @@
  * the Home Assistant websocket API (phil9000/behaviours, phil9000/activity,
  * phil9000/subscribe_activity, phil9000/run_analysis, phil9000/set_status,
  * phil9000/set_name, phil9000/set_actions, phil9000/monitoring,
- * phil9000/set_observed, phil9000/mute_entity, phil9000/unmute_entity); the
- * panel refreshes on phil9000_behaviour_detected.
+ * phil9000/set_observed, phil9000/set_domains, phil9000/mute_entity,
+ * phil9000/unmute_entity); the panel refreshes on
+ * phil9000_behaviour_detected.
  */
 
 const STATUS_RANK = { confirmed: 0, candidate: 1, dismissed: 2 };
@@ -119,10 +120,8 @@ const STYLE = `
     .mute-btn { flex: 0 0 auto; margin-left: auto; padding: 0 9px; font-size: 13px;
                 line-height: 1.5; opacity: .65; }
     .mute-btn:hover { opacity: 1; }
-    .chip { display: inline-block; background: var(--secondary-background-color);
-            border: 1px solid var(--divider-color); border-radius: 6px;
-            padding: 1px 7px; margin: 1px 2px; font-size: 12px;
-            font-family: monospace; }
+    .domain-grid { display: flex; flex-wrap: wrap; gap: 0 22px; margin-bottom: 6px; }
+    .domain-grid .ent-row { font-size: 12px; padding: 2px 0; }
     .entity-search { width: 100%; box-sizing: border-box; padding: 7px 10px;
                      border: 1px solid var(--divider-color); border-radius: 8px;
                      background: var(--card-background-color);
@@ -174,6 +173,8 @@ class Phil9000Panel extends HTMLElement {
       <div id="activity"><p class="empty">Loading…</p></div>
       <h2 class="section">Monitoring</h2>
       <div id="monitoring"><div class="card">
+        <div class="lines">Domain subscriptions</div>
+        <div class="domain-grid" id="domain-list"></div>
         <div class="lines" id="mon-summary"></div>
         <input class="entity-search" placeholder="Search entities — tick to observe, untick to mute…" />
         <div class="ent-list" id="entity-list"><p class="empty">Loading…</p></div>
@@ -188,7 +189,11 @@ class Phil9000Panel extends HTMLElement {
     });
     this.addEventListener("change", (ev) => {
       const box = ev.target.closest("input[data-act='set-observed']");
-      if (box) this._setObserved(box.dataset.entity, box.checked);
+      if (box) {
+        this._setObserved(box.dataset.entity, box.checked);
+        return;
+      }
+      if (ev.target.closest("input[data-act='set-domain']")) this._setDomains();
     });
     this.addEventListener("keydown", (ev) => {
       if (ev.target.classList.contains("name-input")) {
@@ -300,13 +305,40 @@ class Phil9000Panel extends HTMLElement {
       summary.textContent = "";
       return;
     }
-    const chips = (items) => items.map((v) => `<code class="chip">${esc(v)}</code>`).join("");
+    const checked = new Set(m.domains || []);
+    const domainList = this.querySelector("#domain-list");
+    if (domainList) {
+      domainList.innerHTML = (m.domain_options || [])
+        .map(
+          (d) => `<label class="ent-row">
+            <input type="checkbox" data-act="set-domain" data-domain="${esc(d.value)}"
+              ${checked.has(d.value) ? "checked" : ""} />
+            <span>${esc(d.label)}</span>
+          </label>`,
+        )
+        .join("");
+    }
     summary.innerHTML =
-      `Domains: ${(m.domains || []).length ? chips(m.domains) : "none"} · ` +
-      `observing ${(m.observed || []).length} entities · ` +
-      `${(m.muted || []).length} muted. Whole domains: Settings → Integrations → ` +
-      `PHIL9000 → Configure.`;
+      `Observing ${(m.observed || []).length} entities · ${(m.muted || []).length} muted. ` +
+      `Tick entities below to observe or mute them individually.`;
     this._renderEntityList();
+  }
+
+  async _setDomains() {
+    const domains = [...this.querySelectorAll("input[data-act='set-domain']:checked")].map(
+      (box) => box.dataset.domain,
+    );
+    try {
+      await this._hass.connection.sendMessagePromise({
+        type: "phil9000/set_domains",
+        domains,
+      });
+    } catch (err) {
+      this._error = err.message || String(err);
+      this._render();
+    }
+    this._loadMonitoring();
+    this._reloadActivity();
   }
 
   _renderEntityList() {

@@ -450,3 +450,47 @@ async def test_set_observed_untick_of_unobserved_entity_is_noop(
     assert out["success"] is True, out
     assert out["result"]["muted"] == []  # no phantom mute recorded
     assert CONF_EXCLUDE_ENTITIES not in entry.data
+
+
+# -- domain checklist -----------------------------------------------------------
+
+
+async def test_monitoring_lists_domain_options_with_labels(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    await setup_entry(hass, data={CONF_ENTITIES: ["binary_sensor", "light.desk"]})
+    client = await hass_ws_client(hass)
+
+    out = await _send(client, 1, {"type": "phil9000/monitoring"})
+    options = {d["value"]: d["label"] for d in out["result"]["domain_options"]}
+    assert "binary_sensor" in options and "switch" in options
+    assert options["binary_sensor"]  # human label, not just the raw id
+    assert out["result"]["domains"] == ["binary_sensor"]
+
+
+async def test_set_domains_swaps_checklist_and_keeps_panel_specs(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    entry = await setup_entry(
+        hass,
+        data={
+            CONF_ENTITIES: ["binary_sensor", "light.desk"],
+            CONF_EXCLUDE_ENTITIES: [KITCHEN],
+        },
+    )
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    client = await hass_ws_client(hass)
+
+    out = await _send(client, 1, {"type": "phil9000/set_domains", "domains": ["switch"]})
+    assert out["success"] is True, out
+    assert entry.data[CONF_ENTITIES] == sorted(["switch", "light.desk"])
+    assert entry.data[CONF_EXCLUDE_ENTITIES] == [KITCHEN]  # mutes untouched
+    assert not runtime.subscriptions.matches(OFFICE)  # domain unchecked live
+    assert runtime.subscriptions.matches("light.desk")
+
+    out = await _send(client, 2, {"type": "phil9000/set_domains", "domains": ["binary_sensor"]})
+    assert runtime.subscriptions.matches(OFFICE)
+
+    out = await _send(client, 3, {"type": "phil9000/set_domains", "domains": ["bogus_domain"]})
+    assert out["success"] is False
+    assert out["error"]["code"] == "invalid_format"

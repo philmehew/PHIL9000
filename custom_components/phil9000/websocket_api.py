@@ -19,6 +19,8 @@ from .const import (
     CONF_EXCLUDE_ENTITIES,
     CONFIG_DIR,
     DOMAIN,
+    OBSERVABLE_DOMAIN_LABELS,
+    OBSERVABLE_DOMAINS,
 )
 from .models import BehaviourAction, BehaviourStatus
 from .subscriptions import is_valid_entity_id
@@ -248,6 +250,10 @@ def async_setup(hass: HomeAssistant) -> None:
             msg["id"],
             {
                 "domains": sorted(subscriptions.domains),
+                "domain_options": [
+                    {"value": domain, "label": OBSERVABLE_DOMAIN_LABELS.get(domain, domain)}
+                    for domain in sorted(OBSERVABLE_DOMAINS)
+                ],
                 "entities": sorted(subscriptions.entity_ids),
                 "muted": sorted(subscriptions.excluded),
                 "observed": _observed_entities(hass),
@@ -359,6 +365,39 @@ def async_setup(hass: HomeAssistant) -> None:
             {"muted": sorted(excluded), "explicit": sorted(s for s in specs if "." in s)},
         )
 
+    @websocket_api.websocket_command(
+        {"type": "phil9000/set_domains", vol.Required("domains"): [str]}
+    )
+    @websocket_api.async_response
+    async def handle_set_domains(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Replace the subscribed domains (the panel's domain checklist).
+
+        Explicit entity ids added from the panel survive untouched, as do the
+        exclusions; only the bare-domain specs are replaced. Applies in place.
+        """
+        runtime = current_runtime(hass)
+        entry = _entry(hass)
+        if runtime is None or entry is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return
+        wanted = {domain.strip().lower() for domain in msg["domains"]}
+        unknown = sorted(wanted - OBSERVABLE_DOMAINS)
+        if unknown:
+            connection.send_error(
+                msg["id"],
+                websocket_api.ERR_INVALID_FORMAT,
+                f"not observable domains: {', '.join(unknown)}",
+            )
+            return
+        specs = {s for s in entry.data.get(CONF_ENTITIES, ()) if "." in s} | wanted
+        data = {**entry.data, CONF_ENTITIES: sorted(specs)}
+        if data != dict(entry.data):
+            hass.config_entries.async_update_entry(entry, data=data)
+            await hass.async_block_till_done()  # listener swaps subscriptions first
+        connection.send_result(msg["id"], {"domains": sorted(wanted)})
+
     for handler in (
         handle_behaviours,
         handle_set_status,
@@ -371,5 +410,6 @@ def async_setup(hass: HomeAssistant) -> None:
         handle_mute_entity,
         handle_unmute_entity,
         handle_set_observed,
+        handle_set_domains,
     ):
         websocket_api.async_register_command(hass, handler)

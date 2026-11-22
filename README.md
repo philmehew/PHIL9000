@@ -55,19 +55,20 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   `phil9000/set_actions`).
 
 - **Noisy entity? Mute it.** Every activity row has a ⊘ button: the entity is added to
-  the integration's exclusion list (persisted, visible in the options flow), stops being
-  observed immediately — no feed rows, no behaviour steps, no LLM digest lines — and the
-  change applies *in place*, without a config-entry reload, so the live feed keeps
-  streaming. Use **Pause** next to the feed title when rows scroll past too fast: live
-  rows buffer (the button counts them) until you hit **Resume**.
+  the integration's exclusion list (persisted), stops being observed immediately — no
+  feed rows, no behaviour steps, no LLM digest lines — and the change applies *in
+  place*, without a config-entry reload, so the live feed keeps streaming. Use
+  **Pause** next to the feed title when rows scroll past too fast: live rows buffer
+  (the button counts them) until you hit **Resume**.
 
-- **Monitoring** section: the watched domains and a searchable list of *every* entity with
-  a checkbox — tick to observe (unmute, or add as an explicit entity), untick to mute;
-  `added` and `muted` chips show why. This is the quick path for triage; whole-domain
-  subscriptions still live in the integration options, whose extra-entity and exclusion
-  pickers are now proper searchable multi-select lists.
-  (`phil9000/monitoring`, `phil9000/set_observed`, `phil9000/mute_entity`,
-  `phil9000/unmute_entity`)
+- **Monitoring** section: everything you observe, managed from the panel — a
+  **domain subscription checklist** (tick whole domains on/off) plus a searchable list
+  of *every* entity with a checkbox (tick to observe: unmute or add explicitly; untick
+  to mute). `added` and `muted` chips show why each entity is in its current state.
+  The integration options keep the same domain checklist plus the analysis/notify
+  settings, and saving them never clobbers the per-entity picks made here.
+  (`phil9000/monitoring`, `phil9000/set_observed`, `phil9000/set_domains`,
+  `phil9000/mute_entity`, `phil9000/unmute_entity`)
 
 - When a candidate pattern is first seen you also get a nudge (via the `notify` entity
   from the options, otherwise a persistent notification) with the pattern and its id.

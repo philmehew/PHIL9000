@@ -3,8 +3,9 @@
 This module is Home Assistant-facing (only ever imported inside HA).
 
 Setup asks for entity *domains* (a handful of toggles instead of hundreds of
-entities); the options flow adds per-entity refinement — extra entities to
-observe and entities to never observe within subscribed domains.
+entities); the options flow re-edits that checklist plus analysis settings.
+Per-entity management — extra observations and mutes — lives in the panel,
+and saving the options form preserves whatever the panel has set.
 """
 
 from __future__ import annotations
@@ -30,8 +31,6 @@ from homeassistant.helpers.selector import (
 from .analyser import DEFAULT_LOOKBACK_DAYS
 from .const import (
     CONF_ENTITIES,
-    CONF_ENTITY_IDS,
-    CONF_EXCLUDE_ENTITIES,
     DEFAULT_COOLDOWN_DEFAULT,
     DEFAULT_OBSERVABLE_DOMAINS,
     DOMAIN,
@@ -56,24 +55,6 @@ def _domain_picker() -> SelectSelector:
             ],
             multiple=True,
             mode=SelectSelectorMode.LIST,
-        )
-    )
-
-
-def _entity_search(entity_ids: list[str]) -> SelectSelector:
-    """Searchable multi-select over the entities that exist right now.
-
-    (An EntitySelector renders as a single-pick dropdown in practice.) A
-    multiple select with custom values gives a checkbox list with the
-    frontend's built-in search, and still allows typing an id that has no
-    state yet.
-    """
-    return SelectSelector(
-        SelectSelectorConfig(
-            options=sorted(set(entity_ids)),
-            multiple=True,
-            custom_value=True,
-            mode=SelectSelectorMode.DROPDOWN,
         )
     )
 
@@ -126,19 +107,14 @@ class Phil9000OptionsFlow(OptionsFlow):
         if user_input is not None:
             agent_id = (user_input.get(OPTION_AGENT_ID) or "").strip() or None
             notify_entity = (user_input.get(OPTION_NOTIFY_ENTITY) or "").strip() or None
-            observed = sorted(
-                set(user_input.get(CONF_ENTITIES) or [])
-                | set(user_input.get(CONF_ENTITY_IDS) or [])
-            )
-            excluded = sorted(user_input.get(CONF_EXCLUDE_ENTITIES) or [])
+            # The checklist only covers domains: explicit entity ids picked in
+            # the panel survive, and exclusions (mutes) are left alone.
+            _, current_entity_ids = split_specs(self.config_entry.data.get(CONF_ENTITIES, []))
+            observed = sorted(set(user_input.get(CONF_ENTITIES) or []) | current_entity_ids)
             if observed:
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
-                    data={
-                        **self.config_entry.data,
-                        CONF_ENTITIES: observed,
-                        CONF_EXCLUDE_ENTITIES: excluded,
-                    },
+                    data={**self.config_entry.data, CONF_ENTITIES: observed},
                 )
             return self.async_create_entry(
                 title="",
@@ -156,28 +132,10 @@ class Phil9000OptionsFlow(OptionsFlow):
             )
 
         current = self.config_entry.options
-        current_domains, current_entity_ids = split_specs(
-            self.config_entry.data.get(CONF_ENTITIES, [])
-        )
-        # Pickers list what exists; the chosen ids (which always accompany
-        # them below) also stay selectable in case they lost their state.
-        entity_choices = (
-            list(self.hass.states.async_entity_ids())
-            + list(current_entity_ids)
-            + list(self.config_entry.data.get(CONF_EXCLUDE_ENTITIES, []))
-        )
+        current_domains, _ = split_specs(self.config_entry.data.get(CONF_ENTITIES, []))
         schema = vol.Schema(
             {
                 vol.Required(CONF_ENTITIES, default=sorted(current_domains)): _domain_picker(),
-                vol.Optional(
-                    CONF_ENTITY_IDS,
-                    default=sorted(current_entity_ids) or vol.UNDEFINED,
-                ): _entity_search(entity_choices),
-                vol.Optional(
-                    CONF_EXCLUDE_ENTITIES,
-                    default=sorted(self.config_entry.data.get(CONF_EXCLUDE_ENTITIES, []))
-                    or vol.UNDEFINED,
-                ): _entity_search(entity_choices),
                 # Selector defaults are validated by voluptuous: only supply
                 # one when a value is actually configured, otherwise the key
                 # stays absent (blank = unset).
