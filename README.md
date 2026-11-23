@@ -48,7 +48,9 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
 - A **PHIL9000 sidebar panel** shows a live **Recent activity** feed (the last 3 hours,
   up to 1000 real
   state changes on observed entities, read from Home Assistant's recorder — HA's single
-  central activity log), plus learned behaviours with confidence, steps, schedule and
+  central activity log; restart/reconnect "unavailable → on" recoveries are filtered
+  out, while "on → unavailable" offline events stay), plus learned behaviours with
+  confidence, steps, schedule and
   last-fired evidence. From the panel you can confirm, dismiss, reopen, **rename**, edit
   actions, and press **Analyse now** to run the LLM pass immediately (websocket
   commands `phil9000/behaviours`, `phil9000/activity`, `phil9000/subscribe_activity`,

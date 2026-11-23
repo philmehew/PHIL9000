@@ -27,12 +27,26 @@ from typing import Any
 # on anything that runs Home Assistant.
 DEFAULT_LIMIT = 1000
 
+# Transitions *out of* these states are not household activity: every HA
+# restart (and every device reconnect) marks restored entities unavailable /
+# unknown and then pushes their first real state, so the recorder fills with
+# "unavailable -> on" rows. Transitions *into* unavailable stay (a device
+# going offline is worth seeing).
+RECOVERY_STATES = frozenset({"unavailable", "unknown"})
+
+
+def is_recovery(row: dict[str, Any]) -> bool:
+    """True for rows that are just an entity coming back, not activity."""
+    return row.get("old_state") in RECOVERY_STATES
+
 
 def dedupe_activity(rows: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
-    """Merge activity rows: drop non-changes and no-ops, newest first, capped."""
+    """Merge activity rows: drop non-changes, recoveries and no-ops, cap."""
     by_entity: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         if not row.get("at") or row.get("state_changed") is False:
+            continue
+        if is_recovery(row):
             continue
         by_entity.setdefault(row["entity_id"], []).append(row)
 

@@ -238,6 +238,31 @@ async def test_subscribe_activity_pushes_live_rows(hass: HomeAssistant, hass_ws_
     assert out["id"] == 8 and out["success"] is True
 
 
+async def test_live_rows_skip_startup_recoveries(hass: HomeAssistant, hass_ws_client) -> None:
+    """unavailable/unknown -> state is restart noise; -> unavailable is real."""
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json({"id": 7, "type": "phil9000/subscribe_activity"})
+    out = await client.receive_json()
+    assert out["success"] is True
+
+    _fire_state_changed(hass, OFFICE, "unavailable", "on", datetime(2026, 11, 25, 8, 0, tzinfo=UTC))
+    _fire_state_changed(hass, KITCHEN, "unknown", "off", datetime(2026, 11, 25, 8, 0, tzinfo=UTC))
+    _fire_state_changed(
+        hass, OFFICE, "on", "unavailable", datetime(2026, 11, 25, 8, 30, tzinfo=UTC)
+    )
+    await hass.async_block_till_done()
+
+    push = await client.receive_json()
+    assert push["id"] == 7 and push["event"]["new_state"] == "unavailable"
+
+    # Recoveries pushed nothing: next message is our request's response.
+    await client.send_json({"id": 8, "type": "phil9000/behaviours"})
+    out = await client.receive_json()
+    assert out["id"] == 8 and out["success"] is True
+
+
 # -- run_analysis and rename --------------------------------------------------
 
 

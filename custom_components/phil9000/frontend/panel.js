@@ -133,7 +133,8 @@ const STYLE = `
     .section-head { display: flex; align-items: baseline; gap: 12px; }
     .section-head .section { margin-bottom: 0; }
     .section-head button { font-size: 12px; padding: 3px 12px; }
-    .feed-status { font-size: 12px; color: var(--secondary-text-color); }
+    .feed-status { font-size: 12px; color: var(--secondary-text-color);
+                   margin-left: auto; text-align: right; }
     .feed-status.error { color: var(--error-color, #db4437); }
     .top-grid { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
     #activity-col { flex: 3 1 430px; min-width: 320px; }

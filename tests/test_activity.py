@@ -33,6 +33,22 @@ def test_attribute_only_rows_are_dropped():
     assert [r["at"] for r in dedupe_activity(rows)] == ["2026-11-22T17:30:00+00:00"]
 
 
+def test_startup_recoveries_are_dropped_but_offline_events_stay():
+    # The wall of rows every HA restart produces: unavailable/unknown -> real
+    # state. Coming back online is not household activity; going offline is.
+    rows = [
+        row(OFFICE, "2026-11-22T07:00:00+00:00", "on", "unavailable"),  # startup
+        row(OFFICE, "2026-11-22T07:00:05+00:00", "off", "unknown"),  # startup
+        row(OFFICE, "2026-11-22T17:30:00+00:00", "off", "on"),  # real change
+        row(OFFICE, "2026-11-22T18:00:00+00:00", "unavailable", "on"),  # offline!
+    ]
+    feed = dedupe_activity(rows)
+    assert [(r["old_state"], r["new_state"]) for r in feed] == [
+        ("on", "unavailable"),
+        ("on", "off"),
+    ]
+
+
 def test_consecutive_same_state_collapses():
     rows = [
         row(OFFICE, "2026-11-22T17:30:00+00:00", "off", "on"),

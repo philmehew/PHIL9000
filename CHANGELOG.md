@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.5.9 — 2026-11-23
+
+### Restart-noise filter for the activity feed
+
+- Transitions **out of** `unavailable`/`unknown` are no longer shown. Every
+  HA restart (and every device reconnect) marks restored entities
+  unavailable, then pushes their first real state — so the feed and the
+  recorder backfill filled with `unavailable → on` walls that looked like
+  activity but weren't.
+- Transitions **into** `unavailable` stay: a device going offline is real
+  signal.
+- One shared rule (`activity.is_recovery`) covers both the recorder
+  backfill and the live panel push. Behaviour **detection is unchanged** —
+  the engine still sees every state change; only the feed display filters.
+- The `history: …` status text is now right-justified to the right edge of
+  the activity column.
+
 ## v0.5.8 — 2026-11-23
 
 ### Panel polish + a "sending to the LLM" log line

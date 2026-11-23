@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from . import analysis, notifier, websocket_api
+from .activity import is_recovery
 from .const import (
     ANALYSIS_LOG_FILE,
     ATTR_ACTIONS,
@@ -473,6 +474,8 @@ def _publish_activity(runtime: Phil9000Runtime, observation: Observation) -> Non
     """Push a live feed row to the panel's activity subscribers (best effort)."""
     if not runtime.activity_subscribers:
         return
+    if is_recovery({"old_state": observation.old_state}):
+        return  # entity coming back online, not household activity
     row = {
         "entity_id": observation.entity_id,
         "at": observation.timestamp.isoformat(),
