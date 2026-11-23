@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.4 — 2026-11-23
+
+### Fix: activity feed (and analysis history) silently empty since v0.4.8
+
+- v0.4.8's "batched recorder query" passed a **list** of entity ids to
+  `recorder.history.state_changes_during_period`, which in current Home
+  Assistant only accepts a **single** entity id — every call raised
+  `AttributeError`, and the broad except swallowed it, so the initial feed
+  load (and the analysis history read) returned **nothing**. Live rows kept
+  working (they come from the event bus), which masked it.
+- Both call sites now use `get_significant_states`, the real batch API.
+- Recorder read failures are no longer swallowed: they surface as a visible
+  `AnalysisUnavailableError` (the panel shows the reason) and log a warning.
+- New end-to-end tests run against a real sqlite recorder and prove rows
+  flow; they fail on the broken code.
+
 ## v0.5.3 — 2026-11-23
 
 ### Full-size, scrollable activity history

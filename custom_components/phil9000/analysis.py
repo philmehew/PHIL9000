@@ -61,8 +61,9 @@ async def async_collect_history(
     """State-change history per entity, read from HA's recorder.
 
     One recorder query for the whole entity list: whole-domain subscriptions
-    can mean hundreds of entities, and a query per entity (the old shape)
-    meant hundreds of database round-trips per analysis run.
+    can mean hundreds of entities, and a query per entity meant hundreds of
+    database round-trips per analysis run. (``get_significant_states`` is the
+    batch API — ``state_changes_during_period`` takes a single entity id.)
     """
     from homeassistant.components.recorder import (  # function-local: purity guard
         history,
@@ -78,24 +79,29 @@ async def async_collect_history(
     start = datetime.now(UTC) - timedelta(days=days)
     try:
         changes = await hass.async_add_executor_job(
-            history.state_changes_during_period,  # type: ignore[arg-type] # entity_id param: stubs say str, runtime takes str|list
+            history.get_significant_states,
             hass,
             start,
             None,
             entity_ids,
-            True,  # no_attributes
-            False,  # descending
-            None,  # limit
+            None,  # filters
             False,  # include_start_time_state
+            True,  # significant_changes_only (drops attribute-only rows)
+            False,  # minimal_response
+            True,  # no_attributes
         )
-    except Exception:  # noqa: BLE001 — surface as a friendly service error
-        _LOGGER.debug("Could not read history", exc_info=True)
-        return {}
+    except Exception as err:  # noqa: BLE001 — surface as a friendly error
+        _LOGGER.warning("Could not read history for the analysis", exc_info=True)
+        raise AnalysisUnavailableError(f"reading history failed: {err}") from err
     events_by_entity: dict[str, list[tuple[datetime, str]]] = {}
     for entity_id in entity_ids:
+        # minimal_response/compressed_state_format are off: rows are States.
         states = changes.get(entity_id, [])
         if states:
-            events_by_entity[entity_id] = [(state.last_changed, state.state) for state in states]
+            events_by_entity[entity_id] = [
+                (state.last_changed, state.state)  # type: ignore[union-attr]
+                for state in states
+            ]
     return events_by_entity
 
 
@@ -125,33 +131,38 @@ async def async_fetch_activity(
         return []
     start = datetime.now(UTC) - timedelta(hours=ACTIVITY_LOOKBACK_HOURS)
     try:
+        # get_significant_states: the batch API (a list of entity ids in one
+        # query). It returns rows ascending (oldest first) and excludes
+        # attribute-only changes by default.
         changes = await hass.async_add_executor_job(
-            history.state_changes_during_period,  # type: ignore[arg-type] # entity_id param: stubs say str, runtime takes str|list
+            history.get_significant_states,
             hass,
             start,
             None,
             entity_ids,
-            True,  # no_attributes
-            True,  # descending: newest first
-            limit,
+            None,  # filters
             False,  # include_start_time_state
+            True,  # significant_changes_only (drops attribute-only rows)
+            False,  # minimal_response
+            True,  # no_attributes
         )
-    except Exception:  # noqa: BLE001 — an unreadable recorder must not sink the feed
-        _LOGGER.debug("Could not read activity", exc_info=True)
-        return []
+    except Exception as err:  # noqa: BLE001 — the panel must see the reason
+        _LOGGER.warning("Could not read activity for the feed", exc_info=True)
+        raise AnalysisUnavailableError(f"reading activity failed: {err}") from err
     rows: list[dict[str, Any]] = []
     for entity_id in entity_ids:
+        # minimal_response/compressed_state_format are off: rows are States.
         states = changes.get(entity_id, [])
         for index, state in enumerate(states):
-            older = states[index + 1] if index + 1 < len(states) else None
+            older = states[index - 1] if index > 0 else None
             rows.append(
                 {
                     "entity_id": entity_id,
-                    "at": state.last_changed.astimezone(UTC).isoformat(),
-                    "old_state": older.state if older is not None else None,
-                    "new_state": state.state,
-                    # Attribute-only rows keep the previous last_changed.
-                    "state_changed": state.last_changed == state.last_updated,
+                    "at": state.last_changed.astimezone(UTC).isoformat(),  # type: ignore[union-attr]
+                    "old_state": older.state if older is not None else None,  # type: ignore[union-attr]
+                    "new_state": state.state,  # type: ignore[union-attr]
+                    # The query already excludes attribute-only rows.
+                    "state_changed": True,
                 }
             )
     return dedupe_activity(rows, limit)
