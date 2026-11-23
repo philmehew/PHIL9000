@@ -37,18 +37,27 @@ DEFAULT_LIMIT = 1000
 RECOVERY_STATES = frozenset({"unavailable", "unknown"})
 
 
-def is_recovery(row: dict[str, Any]) -> bool:
-    """True for rows where either end is unavailable/unknown (device noise)."""
-    return row.get("old_state") in RECOVERY_STATES or row.get("new_state") in RECOVERY_STATES
+def is_feed_noise(row: dict[str, Any]) -> bool:
+    """True for rows the feed must not show.
+
+    Either end unavailable/unknown (device bookkeeping), or no previous
+    state at all ("— -> idle"): the first entry for an entity in the
+    window proves nothing changed, only that we started watching it.
+    """
+    return (
+        row.get("old_state") in RECOVERY_STATES
+        or row.get("new_state") in RECOVERY_STATES
+        or row.get("old_state") is None
+    )
 
 
 def dedupe_activity(rows: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
-    """Merge activity rows: drop non-changes, recoveries and no-ops, cap."""
+    """Merge activity rows: drop non-changes, noise and no-ops, cap."""
     by_entity: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         if not row.get("at") or row.get("state_changed") is False:
             continue
-        if is_recovery(row):
+        if is_feed_noise(row):
             continue
         by_entity.setdefault(row["entity_id"], []).append(row)
 

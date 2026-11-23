@@ -48,6 +48,7 @@ async def test_fetch_activity_returns_recorder_rows(hass: HomeAssistant, tmp_pat
     hass.states.async_set(OFFICE, "on")
     hass.states.async_set(OFFICE, "off")
     hass.states.async_set(KITCHEN, "on")
+    hass.states.async_set(KITCHEN, "off")
     await _recorder_ready(hass)
 
     rows = await analysis.async_fetch_activity(hass, [OFFICE, KITCHEN], 1000)
@@ -55,8 +56,12 @@ async def test_fetch_activity_returns_recorder_rows(hass: HomeAssistant, tmp_pat
     office_rows = [row for row in rows if row["entity_id"] == OFFICE]
     assert office_rows[0]["new_state"] == "off"  # newest first
     assert office_rows[0]["old_state"] == "on"
+    # Each entity's very first recorded state has no previous state
+    # ("— -> on"), so the feed drops it; the real changes remain.
+    first_states = [row for row in rows if row["old_state"] is None]
+    assert first_states == []
     kitchen_rows = [row for row in rows if row["entity_id"] == KITCHEN]
-    assert kitchen_rows[0]["new_state"] == "on"
+    assert [(r["old_state"], r["new_state"]) for r in kitchen_rows] == [("on", "off")]
     # newest first
     assert rows == sorted(rows, key=lambda r: r["at"], reverse=True)
 

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from . import analysis, notifier, websocket_api
-from .activity import is_recovery
+from .activity import is_feed_noise
 from .const import (
     ANALYSIS_LOG_FILE,
     ATTR_ACTIONS,
@@ -474,8 +474,8 @@ def _publish_activity(runtime: Phil9000Runtime, observation: Observation) -> Non
     """Push a live feed row to the panel's activity subscribers (best effort)."""
     if not runtime.activity_subscribers:
         return
-    if is_recovery({"old_state": observation.old_state, "new_state": observation.new_state}):
-        return  # availability bookkeeping, not household activity
+    if is_feed_noise({"old_state": observation.old_state, "new_state": observation.new_state}):
+        return  # availability bookkeeping or no known previous state
     row = {
         "entity_id": observation.entity_id,
         "at": observation.timestamp.isoformat(),

@@ -71,7 +71,7 @@ def test_rows_without_timestamp_are_dropped():
 
 def test_input_order_does_not_matter():
     rows = [
-        row(KITCHEN, "2026-11-22T17:32:00+00:00", "on"),
+        row(KITCHEN, "2026-11-22T17:32:00+00:00", "on", "off"),
         row(OFFICE, "2026-11-22T17:30:00+00:00", "off", "on"),
         row(OFFICE, "2026-11-21T17:30:00+00:00", "on", "off"),
     ]
@@ -83,9 +83,25 @@ def test_input_order_does_not_matter():
     ]
 
 
+def test_rows_without_previous_state_are_dropped():
+    # "— -> idle": the first entry for an entity in the window proves
+    # nothing changed, only that we started watching it (newly-added
+    # AirPlay players, entities appearing after a restart, ...).
+    rows = [
+        row("media_player.office_airplay", "2026-11-22T08:00:00+00:00", "idle"),
+        row(OFFICE, "2026-11-22T17:30:00+00:00", "off", "on"),
+    ]
+    assert [r["entity_id"] for r in dedupe_activity(rows)] == [OFFICE]
+
+
 def test_default_limit_is_1000():
     rows = [
-        row("sensor.x", f"2026-11-22T{h // 60:02d}:{h % 60:02d}:00+00:00", str(i))
+        row(
+            "sensor.x",
+            f"2026-11-22T{h // 60:02d}:{h % 60:02d}:00+00:00",
+            str(i),
+            str(i - 1),
+        )
         for h, i in enumerate(range(DEFAULT_LIMIT + 200))
     ]
     assert len(dedupe_activity(rows)) == DEFAULT_LIMIT

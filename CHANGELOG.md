@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.11 — 2026-11-23
+
+### Filter "— → state" rows (no previous state)
+
+- Rows where the previous state is blank — e.g.
+  `media_player.office_airplay_2 — → idle` — are no longer shown. They are
+  an entity's first entry in the window (newly-discovered devices, entities
+  re-appearing after a restart): nothing changed, we just started watching.
+- The single feed rule (`activity.is_feed_noise`) now covers availability
+  transitions **and** missing previous states, applied to both the recorder
+  backfill and live pushes. Side effect by design: each entity's earliest
+  row in the window is its first real transition, not its starting state.
+
 ## v0.5.10 — 2026-11-23
 
 ### Activity feed now hides availability noise in both directions
