@@ -347,3 +347,22 @@ async def test_analysis_log_buffer_is_capped(hass: HomeAssistant) -> None:
     assert len(runtime.analysis_log) == ANALYSIS_LOG_LIMIT
     assert runtime.analysis_log[0]["message"] == "line 10"  # oldest dropped first
     assert runtime.analysis_log[-1]["message"] == f"line {ANALYSIS_LOG_LIMIT + 9}"
+
+
+async def test_skip_line_is_persisted_without_a_run(hass: HomeAssistant) -> None:
+    """The 'already in progress' log line survives a restart too."""
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.analysis_running = True  # simulate an in-flight run
+
+    with pytest.raises(AnalysisUnavailableError, match="already in progress"):
+        await async_run_analysis(hass, entry, runtime, notify=False)
+
+    from custom_components.phil9000.const import ANALYSIS_LOG_FILE
+    from custom_components.phil9000.yaml_store import AnalysisLogStore
+
+    store = AnalysisLogStore(hass.config.path("phil9000", ANALYSIS_LOG_FILE))
+    loaded = await hass.async_add_executor_job(store.load)
+    assert loaded, "the skip line must reach the file without a full run"
+    assert loaded[-1]["message"].startswith("Skipped")

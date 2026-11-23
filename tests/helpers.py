@@ -2,18 +2,29 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant, ServiceCall, State
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.phil9000.const import CONF_ENTITIES, DOMAIN
 from custom_components.phil9000.yaml_store import BehaviourStore
 
 OFFICE = "binary_sensor.office_presence"
 KITCHEN = "binary_sensor.kitchen_presence"
+
+
+async def flush_saves(hass: HomeAssistant) -> None:
+    """Advance past the debounced behaviours.yaml save (occurrence bumps)."""
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=60))
+    await hass.async_block_till_done()
+
 
 # A fake service domain used to spy on action execution.
 ACTION_DOMAIN = "test_automation"

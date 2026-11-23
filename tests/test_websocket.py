@@ -22,6 +22,7 @@ from tests.helpers import (
     _fire_state_changed,
     capture_events,
     fire_evening,
+    flush_saves,
     reload_behaviours,
     seed_behaviours,
     setup_entry,
@@ -390,6 +391,7 @@ async def test_unmute_entity_restores_live_rows(hass: HomeAssistant, hass_ws_cli
     await fire_evening(hass, day=26)  # both steps now observed: both rows
     assert (await client.receive_json())["event"]["entity_id"] == OFFICE
     assert (await client.receive_json())["event"]["entity_id"] == KITCHEN
+    await flush_saves(hass)  # occurrence bumps persist on a debounce
     assert reload_behaviours(hass)[0].occurrences == 1
 
 

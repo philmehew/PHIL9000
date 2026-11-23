@@ -195,3 +195,60 @@ class TestTimeWindowWrap:
         assert _in_time_window(time(17, 0), time(16, 0), time(19, 0))
         assert not _in_time_window(time(20, 0), time(16, 0), time(19, 0))
         assert _in_time_window(time(20, 0), None, None)
+
+
+class TestStepEntityIndex:
+    def test_unrelated_entities_are_skipped(self, confirmed_behaviour: Behaviour) -> None:
+        engine = DetectionEngine([confirmed_behaviour])
+        assert engine.involves(OFFICE) and engine.involves(KITCHEN)
+        assert not engine.involves("binary_sensor.garage")
+
+        # No behaviour references this entity: observing it is a no-op.
+        assert engine.observe(obs("binary_sensor.garage", "on", MON_17_30)) == []
+        assert engine._partial == {}
+
+    def test_index_covers_added_behaviours_and_refinements(self) -> None:
+        engine = DetectionEngine([])
+        assert not engine.involves("light.desk")
+        behaviour = Behaviour(
+            id="b1",
+            name="Desk on",
+            steps=[BehaviourStep("light.desk", "on")],
+        )
+        engine.add_behaviour(behaviour)
+        assert engine.involves("light.desk")
+        # Refinement moves the step onto a new entity; rebuild_index covers it.
+        behaviour.steps = [BehaviourStep("light.desk_lamp", "on")]
+        assert not engine.involves("light.desk_lamp")
+        engine.rebuild_index()
+        assert engine.involves("light.desk_lamp")
+
+    def test_removed_behaviour_no_longer_matches(self, confirmed_behaviour: Behaviour) -> None:
+        engine = DetectionEngine([confirmed_behaviour])
+        engine.remove_behaviour(confirmed_behaviour.id)
+        stream = [obs(OFFICE, "off", MON_17_30), obs(KITCHEN, "on", MON_17_32)]
+        assert engine.observe_all(stream) == []
+
+
+class TestWrongStateRestart:
+    def test_breaking_event_can_start_a_fresh_sequence(self) -> None:
+        """a=on → a=off; a repeated a=on breaks the match but restarts it."""
+        behaviour = Behaviour(
+            id="toggle",
+            name="Desk toggle",
+            steps=[
+                BehaviourStep("light.desk", "on"),
+                BehaviourStep("light.desk", "off", max_gap_seconds=300),
+            ],
+            status=BehaviourStatus.CONFIRMED,
+        )
+        engine = DetectionEngine([behaviour])
+        detections = engine.observe_all(
+            [
+                obs("light.desk", "on", MON_17_30),
+                obs("light.desk", "on", MON_17_31),  # wrong state for step 2: restart
+                obs("light.desk", "off", MON_17_33),
+            ]
+        )
+        assert len(detections) == 1
+        assert [o.timestamp for o in detections[0].matched] == [MON_17_31, MON_17_33]

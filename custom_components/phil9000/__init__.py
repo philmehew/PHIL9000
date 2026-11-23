@@ -36,6 +36,7 @@ from .const import (
     OPTION_ANALYSIS_ENABLED,
     PANEL_URL_PATH,
     PANEL_WEBCOMPONENT,
+    SAVE_DEBOUNCE_SECONDS,
     SERVICE_CONFIRM_BEHAVIOUR,
     SERVICE_DISMISS_BEHAVIOUR,
     SERVICE_RUN_ANALYSIS,
@@ -93,6 +94,8 @@ class Phil9000Runtime:
     activity_subscribers: list[Callable[[dict], None]] = field(default_factory=list)
     # True while an LLM analysis pass is running (one run at a time).
     analysis_running: bool = False
+    # Whether a debounced occurrence-save is already scheduled.
+    _save_pending: bool = False
     # Ring buffer of recent analysis runs (oldest first), entries
     # {"at": iso-utc, "level": "info"|"error", "message": str}: what the
     # analyser did and what came back, shown in the panel's Analysis log.
@@ -135,6 +138,27 @@ class Phil9000Runtime:
         behaviour.custom_name = True
         await _async_save(hass, self)
         return behaviour
+
+    def schedule_save(self, hass: HomeAssistant) -> None:
+        """Persist soon, collapsing bursts of occurrence-counter bumps.
+
+        Only the debounce path uses this: explicit user actions (confirm,
+        rename, edit actions) still save immediately.
+        """
+        if self._save_pending:
+            return
+        self._save_pending = True
+        from datetime import datetime  # function-local: purity guard
+
+        from homeassistant.helpers.event import (  # function-local: purity guard
+            async_call_later,
+        )
+
+        async def _flush(now: datetime) -> None:  # noqa: ARG001
+            self._save_pending = False
+            await _async_save(hass, self)
+
+        async_call_later(hass, SAVE_DEBOUNCE_SECONDS, _flush)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
@@ -407,9 +431,10 @@ def _event_handler(
             new_state=new_state.state,
             old_state=old_state.state if old_state else None,
             timestamp=new_state.last_changed,
-            attributes=dict(new_state.attributes),
         )
         _publish_activity(runtime, observation)
+        if not engine.involves(entity_id):
+            return  # no sequence involves this entity: nothing can change
         before = {bid: b.occurrences for bid, b in engine.behaviours.items()}
         for detection in engine.observe(observation):
             trail = " → ".join(f"{o.entity_id}={o.new_state}" for o in detection.matched)
@@ -432,7 +457,7 @@ def _event_handler(
         if newly_matched:
             # The engine tallies occurrences for every status (including
             # matches suppressed by cooldown); persist whenever counters moved.
-            hass.async_create_task(_async_save(hass, runtime))
+            runtime.schedule_save(hass)
             for behaviour in newly_matched:
                 if (
                     behaviour.status is BehaviourStatus.CANDIDATE

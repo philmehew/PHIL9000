@@ -38,6 +38,7 @@ from tests.helpers import (
     capture_calls,
     capture_events,
     fire_evening,
+    flush_saves,
     reload_behaviours,
     seed_behaviours,
     setup_entry,
@@ -75,6 +76,7 @@ async def test_confirmed_behaviour_fires_event_and_runs_actions(
     assert actions[0].data["note"] == "welcome home"
     assert actions[0].data["entity_id"] == ACTION_TARGET  # target merged in
 
+    await flush_saves(hass)  # occurrence bumps persist on a debounce
     assert reload_behaviours(hass)[0].occurrences == 1
 
 
@@ -165,6 +167,7 @@ async def test_candidate_nudges_once_and_never_fires(hass: HomeAssistant) -> Non
     assert detections == []
     assert actions == []
     assert len(notifies) == 1
+    await flush_saves(hass)  # occurrence bumps persist on a debounce
     assert reload_behaviours(hass)[0].occurrences == 2
 
 
@@ -196,6 +199,7 @@ async def test_confirm_service_promotes_candidate_and_later_detection_acts(
     await fire_evening(hass, day=24)  # Tuesday: now confirmed → event + action
     assert len(detections) == 1
     assert len(actions) == 1
+    await flush_saves(hass)  # occurrence bumps persist on a debounce
     assert reload_behaviours(hass)[0].occurrences == 2
 
 
@@ -219,6 +223,7 @@ async def test_dismiss_service_stops_events_and_nudges(hass: HomeAssistant) -> N
     assert detections == []
     assert notifies == []
     # Occurrences keep tallying for the record, but nothing else happens.
+    await flush_saves(hass)  # occurrence bumps persist on a debounce
     assert reload_behaviours(hass)[0].occurrences == 1
 
 
@@ -340,3 +345,33 @@ async def test_services_reject_non_admin_users(hass: HomeAssistant, hass_read_on
 
     runtime = hass.data[DOMAIN][entry.entry_id]
     assert runtime.engine.behaviours["end_of_work_day"].status is BehaviourStatus.CONFIRMED
+
+
+async def test_occurrence_saves_are_debounced_and_deduplicate(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    await setup_entry(hass)
+
+    await fire_evening(hass, day=23)
+    await fire_evening(hass, day=24)
+    await hass.async_block_till_done()
+
+    # Counters moved in memory but the file write is deferred (and collapses
+    # the two bumps into one save, not one per match).
+    assert reload_behaviours(hass)[0].occurrences == 0
+
+    await flush_saves(hass)
+    assert reload_behaviours(hass)[0].occurrences == 2
+
+
+async def test_detection_payload_has_no_attribute_bloat(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    await setup_entry(hass)
+    events = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+
+    await fire_evening(hass, day=23)
+    await hass.async_block_till_done()
+
+    assert events, "expected a detection event"
+    matched = events[0]["matched"]
+    assert matched and "attributes" not in matched[0]  # dropped as dead weight
+    assert "entity_id" in matched[0] and "new_state" in matched[0]

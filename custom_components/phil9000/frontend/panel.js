@@ -60,9 +60,7 @@ const formatClock = (iso) => {
 
 const STYLE = `
   <style>
-    /* Rendered in the light DOM (no shadow root), so :host would not
-       match — style the panel element by its tag instead. */
-    phil9000-panel { display: block; padding: 16px; color: var(--primary-text-color);
+    :host { display: block; padding: 16px; color: var(--primary-text-color);
             font-family: Roboto, sans-serif; }
     header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
     header h1 { font-size: 20px; font-weight: 500; margin: 0; }
@@ -157,6 +155,16 @@ const STYLE = `
   </style>`;
 
 class Phil9000Panel extends HTMLElement {
+  constructor() {
+    super();
+    // Shadow DOM: the panel's styles (button, .card, .error ...) would
+    // otherwise leak into the whole Home Assistant document, and HA's own
+    // styles could bleed in. Custom properties still inherit through the
+    // shadow boundary, so HA themes keep working.
+    this.shadow = this.attachShadow({ mode: "open" });
+    this._initialized = false;
+  }
+
   set hass(hass) {
     this._hass = hass;
     if (this._initialized) return;
@@ -181,7 +189,7 @@ class Phil9000Panel extends HTMLElement {
     // subscriptions/analysis) is admin-only on the backend; reflect that.
     this._readOnly = hass.user && hass.user.is_admin === false;
 
-    this.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
+    this.shadow.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
       <button data-act="analyse" ${this._analysing || this._readOnly ? "disabled" : ""}>Analyse now</button>
       <button class="secondary" data-act="refresh">Refresh</button></header>
       <p class="meta"></p><div id="banner"></div>
@@ -208,14 +216,14 @@ class Phil9000Panel extends HTMLElement {
         </div>
       </div>
       <h2 class="section">Behaviours</h2><div id="body"><p class="empty">Loading…</p></div>`;
-    this.addEventListener("click", (ev) => this._onClick(ev));
-    this.addEventListener("input", (ev) => {
+    this.shadow.addEventListener("click", (ev) => this._onClick(ev));
+    this.shadow.addEventListener("input", (ev) => {
       if (ev.target.classList.contains("entity-search")) {
         this._entityFilter = ev.target.value.trim().toLowerCase();
         this._renderEntityList();
       }
     });
-    this.addEventListener("change", (ev) => {
+    this.shadow.addEventListener("change", (ev) => {
       const box = ev.target.closest("input[data-act='set-observed']");
       if (box) {
         this._setObserved(box.dataset.entity, box.checked);
@@ -223,7 +231,7 @@ class Phil9000Panel extends HTMLElement {
       }
       if (ev.target.closest("input[data-act='set-domain']")) this._setDomains();
     });
-    this.addEventListener("keydown", (ev) => {
+    this.shadow.addEventListener("keydown", (ev) => {
       if (ev.target.classList.contains("name-input")) {
         if (ev.key === "Enter") ev.target.closest(".card").querySelector('[data-act="save-name"]').click();
         if (ev.key === "Escape") {
@@ -288,20 +296,31 @@ class Phil9000Panel extends HTMLElement {
   }
 
   async _reloadActivity() {
+    let fetched = [];
     try {
       const result = await this._hass.connection.sendMessagePromise({
         type: "phil9000/activity",
       });
-      this._activity = result.items || [];
+      fetched = result.items || [];
       this._activityHint = result.hint || "";
     } catch (err) {
       this._activityHint = err.message || String(err);
     }
+    // Rows pushed live since subscribing may not be committed to the
+    // recorder yet (it writes asynchronously): merge them in instead of
+    // overwriting, deduped on (at, entity), newest first, capped.
+    const seen = new Set(fetched.map((r) => `${r.at}|${r.entity_id}`));
+    const liveOnly = (this._activity || []).filter(
+      (r) => !seen.has(`${r.at}|${r.entity_id}`),
+    );
+    this._activity = [...fetched, ...liveOnly]
+      .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+      .slice(0, 25);
     this._renderActivity();
   }
 
   _renderActivity() {
-    const el = this.querySelector("#activity");
+    const el = this.shadow.querySelector("#activity");
     if (!el) return;
     if (this._activity.length === 0) {
       el.innerHTML = `<p class="empty">${esc(
@@ -338,7 +357,7 @@ class Phil9000Panel extends HTMLElement {
   }
 
   _renderAnalysisLog() {
-    const el = this.querySelector("#analysis-log");
+    const el = this.shadow.querySelector("#analysis-log");
     if (!el) return;
     const entries = this._analysisLog || [];
     if (entries.length === 0) {
@@ -368,7 +387,7 @@ class Phil9000Panel extends HTMLElement {
   }
 
   _updatePauseBtn() {
-    const btn = this.querySelector('[data-act="pause"]');
+    const btn = this.shadow.querySelector('[data-act="pause"]');
     if (!btn) return;
     btn.textContent = this._paused
       ? `Resume${this._pending.length ? ` (${this._pending.length})` : ""}`
@@ -389,12 +408,12 @@ class Phil9000Panel extends HTMLElement {
   }
 
   _renderMonitoring() {
-    const domainList = this.querySelector("#domain-list");
+    const domainList = this.shadow.querySelector("#domain-list");
     if (!domainList) return;
     const m = this._monitoring;
     if (!m) {
       domainList.innerHTML = "";
-      const entityList = this.querySelector("#entity-list");
+      const entityList = this.shadow.querySelector("#entity-list");
       if (entityList) entityList.innerHTML = "";
       return;
     }
@@ -413,7 +432,7 @@ class Phil9000Panel extends HTMLElement {
   }
 
   async _setDomains() {
-    const domains = [...this.querySelectorAll("input[data-act='set-domain']:checked")].map(
+    const domains = [...this.shadow.querySelectorAll("input[data-act='set-domain']:checked")].map(
       (box) => box.dataset.domain,
     );
     try {
@@ -430,7 +449,7 @@ class Phil9000Panel extends HTMLElement {
   }
 
   _renderEntityList() {
-    const el = this.querySelector("#entity-list");
+    const el = this.shadow.querySelector("#entity-list");
     if (!el || !this._monitoring) return;
     const m = this._monitoring;
     const observed = new Set(m.observed || []);
@@ -533,7 +552,7 @@ class Phil9000Panel extends HTMLElement {
   _collectDraft() {
     // Pull current input values into the draft before mutating it.
     if (!this._editing) return;
-    this.querySelectorAll(".action-row").forEach((row) => {
+    this.shadow.querySelectorAll(".action-row").forEach((row) => {
       const idx = Number(row.dataset.idx);
       this._draft[idx] = {
         domain: row.querySelector('[data-field="domain"]').value.trim(),
@@ -597,7 +616,7 @@ class Phil9000Panel extends HTMLElement {
       return this._render();
     }
     if (act === "save-name") {
-      const input = this.querySelector(".name-input");
+      const input = this.shadow.querySelector(".name-input");
       const name = input ? input.value.trim() : "";
       if (!name) return undefined;
       this._renaming = null;
@@ -634,19 +653,19 @@ class Phil9000Panel extends HTMLElement {
   }
 
   _render() {
-    const banner = this.querySelector("#banner");
+    const banner = this.shadow.querySelector("#banner");
     banner.innerHTML =
       (this._error ? `<div class="error">${esc(this._error)}</div>` : "") +
       (this._analysisNote ? `<div class="note">${esc(this._analysisNote)}</div>` : "");
-    const analyseBtn = this.querySelector('[data-act="analyse"]');
+    const analyseBtn = this.shadow.querySelector('[data-act="analyse"]');
     if (analyseBtn) analyseBtn.disabled = this._analysing || this._busy || this._readOnly;
-    const meta = this.querySelector(".meta");
+    const meta = this.shadow.querySelector(".meta");
     const entities = (this._meta.observed_entities || []).length;
     meta.innerHTML =
       `Observing <code>${entities}</code> entities · behaviours stored in <code>${esc(this._meta.path)}</code>` +
       (this._readOnly ? ` · <b>read-only</b> — sign in as an admin to make changes` : "");
 
-    const body = this.querySelector("#body");
+    const body = this.shadow.querySelector("#body");
     if (!this._behaviours) return;
     if (this._behaviours.length === 0) {
       body.innerHTML = `<p class="empty">No behaviours learned yet. PHIL9000 is observing your
@@ -658,7 +677,7 @@ class Phil9000Panel extends HTMLElement {
     // the user is typing: harvest the editor inputs first, and restore the
     // rename box's typed text after the re-render.
     if (this._editing) this._collectDraft();
-    const openNameInput = this.querySelector(".name-input");
+    const openNameInput = this.shadow.querySelector(".name-input");
     const typedName = this._renaming && openNameInput ? openNameInput.value : null;
     const sorted = [...this._behaviours].sort(
       (a, b) =>

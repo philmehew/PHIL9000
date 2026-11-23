@@ -63,19 +63,41 @@ class DetectionEngine:
         self._partial: dict[str, list[Observation]] = {}
         # behaviour_id -> timestamp of last completed match (cooldowns).
         self._last_fired: dict[str, datetime] = {}
+        # Entities appearing in any behaviour's steps. An event for anything
+        # else can neither start, advance, nor break a sequence, so observe()
+        # skips it outright — with whole-domain subscriptions most events are
+        # irrelevant, and the engine stays O(behaviours) only for them.
+        self._step_entities: set[str] = set()
+        self.rebuild_index()
 
     # -- public API ----------------------------------------------------
 
     def add_behaviour(self, behaviour: Behaviour) -> None:
         self.behaviours[behaviour.id] = behaviour
+        self._step_entities.update(step.entity_id for step in behaviour.steps)
 
     def remove_behaviour(self, behaviour_id: str) -> None:
         self.behaviours.pop(behaviour_id, None)
         self._partial.pop(behaviour_id, None)
         self._last_fired.pop(behaviour_id, None)
+        # Recomputed rather than pruned: a removed behaviour's entities may
+        # still be steps of a surviving one (and over-inclusion is safe).
+        self.rebuild_index()
+
+    def rebuild_index(self) -> None:
+        """Recompute the step-entity index (call after refining steps)."""
+        self._step_entities = {
+            step.entity_id for behaviour in self.behaviours.values() for step in behaviour.steps
+        }
+
+    def involves(self, entity_id: str) -> bool:
+        """Whether any behaviour's sequence can be affected by this entity."""
+        return entity_id in self._step_entities
 
     def observe(self, observation: Observation) -> list[Detection]:
         """Process one observation; return detections completed by this event."""
+        if observation.entity_id not in self._step_entities:
+            return []
         detections: list[Detection] = []
         for behaviour in self.behaviours.values():
             detection = self._advance(behaviour, observation)
@@ -155,8 +177,12 @@ class DetectionEngine:
         # Advance an in-progress match with the expected next step?
         if observation.entity_id == step.entity_id:
             if not self._matches(step, observation):
+                # Wrong state for the next step: the sequence is broken, but
+                # this same event may legitimately start a fresh one (e.g.
+                # steps a=on → a=off, and a=on repeats). Same as the
+                # gap-timeout branch below.
                 self._partial.pop(behaviour.id, None)
-                return None
+                return self._try_start(behaviour, observation)
             gap = (observation.timestamp - partial[-1].timestamp).total_seconds()
             if gap < 0:
                 self._partial.pop(behaviour.id, None)

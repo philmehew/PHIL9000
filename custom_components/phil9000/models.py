@@ -28,13 +28,17 @@ class BehaviourStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Observation:
-    """A timestamped entity state change (e.g. office presence → off at 17:30)."""
+    """A timestamped entity state change (e.g. office presence → off at 17:30).
+
+    Attributes are deliberately not carried: nothing consumes them, and
+    copying a full attribute dict per event bloated memory, the detection
+    event payloads and last-detection evidence for no gain.
+    """
 
     entity_id: str
     new_state: str
     timestamp: datetime
     old_state: str | None = None
-    attributes: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,7 +46,6 @@ class Observation:
             "new_state": self.new_state,
             "timestamp": self.timestamp.isoformat(),
             "old_state": self.old_state,
-            "attributes": self.attributes,
         }
 
 

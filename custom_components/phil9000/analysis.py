@@ -211,6 +211,18 @@ def _log_run(runtime: Phil9000Runtime, level: str, message: str) -> None:
         subscriber(dict(entry))
 
 
+async def _async_persist_log(hass: HomeAssistant, runtime: Phil9000Runtime) -> None:
+    """Write the analysis log file; a log write must never sink a run."""
+    if runtime.analysis_log_store is None:
+        return
+    try:
+        await hass.async_add_executor_job(
+            runtime.analysis_log_store.save, list(runtime.analysis_log)
+        )
+    except OSError:
+        _LOGGER.warning("PHIL9000 could not persist the analysis log", exc_info=True)
+
+
 async def async_run_analysis(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -233,6 +245,7 @@ async def async_run_analysis(
     """
     if runtime.analysis_running:
         _log_run(runtime, "error", "Skipped: another analysis run is already in progress")
+        await _async_persist_log(hass, runtime)  # the run path never saves for us
         raise AnalysisUnavailableError("a PHIL9000 analysis run is already in progress")
     runtime.analysis_running = True
     started = time.monotonic()
@@ -258,13 +271,7 @@ async def async_run_analysis(
         return summary
     finally:
         runtime.analysis_running = False
-        if runtime.analysis_log_store is not None:
-            try:
-                await hass.async_add_executor_job(
-                    runtime.analysis_log_store.save, list(runtime.analysis_log)
-                )
-            except OSError:  # a log file must never sink a run
-                _LOGGER.warning("PHIL9000 could not persist the analysis log", exc_info=True)
+        await _async_persist_log(hass, runtime)
 
 
 async def _async_analysis_pass(
@@ -307,6 +314,9 @@ async def _async_analysis_pass(
     if result.refined or result.new:
         for behaviour in result.new:
             runtime.engine.add_behaviour(behaviour)
+        # Refinements rewrite steps of existing behaviours (possibly onto
+        # new entities), so the engine's step-entity index must be rebuilt.
+        runtime.engine.rebuild_index()
         await hass.async_add_executor_job(
             runtime.store.save, list(runtime.engine.behaviours.values())
         )

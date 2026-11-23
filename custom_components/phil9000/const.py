@@ -100,6 +100,9 @@ BEHAVIOURS_FILE = "behaviours.yaml"
 # Ring buffer of recent analysis runs shown in the panel (newest last).
 ANALYSIS_LOG_FILE = "analysis_log.yaml"
 ANALYSIS_LOG_LIMIT = 50
+# Occurrence-counter saves are debounced: a noisy candidate can bump
+# counters on every match, and behaviours.yaml need not rewrite that often.
+SAVE_DEBOUNCE_SECONDS = 30
 
 # hass.data flag: static assets + sidebar panel registered this run
 UI_REGISTERED_FLAG = f"{DOMAIN}_ui_registered"

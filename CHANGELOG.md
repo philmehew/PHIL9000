@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.5.0 — 2026-11-23
+
+### Review backlog: engine efficiency, debounced saves, shadow-DOM panel
+
+- **The detection engine pre-filters events.** It now keeps an index of the
+  entities appearing in any behaviour's steps; events for everything else
+  (most of a whole-domain subscription) are skipped before the engine or
+  the occurrence bookkeeping runs — no semantics change, but O(behaviours)
+  work only happens for relevant events. The index rebuilds after LLM
+  refinements so new entities are covered immediately.
+- **behaviours.yaml writes are debounced** (30s): a noisy candidate used to
+  rewrite the file on every match. Explicit user actions still save
+  immediately; at worst 30s of occurrence counters are lost on a hard crash.
+- **A breaking event can restart a sequence**: an event that arrives with
+  the wrong state for the next step used to just cancel the match, unlike
+  the gap-timeout branch which retries the same event against the first
+  step. Both paths now behave the same.
+- **The activity feed keeps live rows on first load**: rows pushed between
+  subscribing and the recorder's (asynchronous) commit were silently
+  overwritten by the initial fetch; they're now merged in, deduped and
+  re-sorted newest-first.
+- **The "Skipped: analysis already in progress" log line is persisted**
+  like every other log line, instead of living only until the next run.
+- **`Observation.attributes` is gone**: the full attribute dict was copied
+  per event and shipped in every detection event payload, but nothing ever
+  read it.
+- **The panel renders in a shadow root**: its styles (button, .card, …)
+  previously leaked into the whole Home Assistant document — and HA's could
+  bleed in. CSS is now fully encapsulated; HA theme variables still inherit
+  through the shadow boundary.
+
 ## v0.4.9 — 2026-11-23
 
 ### Admin-only amendments
