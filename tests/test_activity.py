@@ -69,8 +69,9 @@ def test_input_order_does_not_matter():
     ]
 
 
-def test_default_limit_is_25():
+def test_default_limit_is_1000():
     rows = [
-        row("sensor.x", f"2026-11-22T{h:02d}:00:00+00:00", str(i)) for h, i in enumerate(range(60))
+        row("sensor.x", f"2026-11-22T{h // 60:02d}:{h % 60:02d}:00+00:00", str(i))
+        for h, i in enumerate(range(DEFAULT_LIMIT + 200))
     ]
     assert len(dedupe_activity(rows)) == DEFAULT_LIMIT

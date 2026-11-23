@@ -99,7 +99,7 @@ async def async_collect_history(
     return events_by_entity
 
 
-ACTIVITY_LOOKBACK_DAYS = 7
+ACTIVITY_LOOKBACK_HOURS = 3
 
 
 async def async_fetch_activity(
@@ -107,9 +107,11 @@ async def async_fetch_activity(
 ) -> list[dict[str, Any]]:
     """Newest real state changes on the observed entities (the panel feed).
 
-    Reads the recorder — HA's single central activity log — per entity, marks
-    attribute-only rows as non-changes, derives old_state from the previous
-    recorded state, and merges through dedupe_activity (newest first, capped).
+    Reads the recorder — HA's single central activity log — in one query,
+    marks attribute-only rows as non-changes, derives old_state from the
+    previous recorded state, and merges through dedupe_activity (newest
+    first, capped). The short window (hours, not days) keeps the query
+    trivial; the row cap bounds the payload.
     """
     from homeassistant.components.recorder import (  # function-local: purity guard
         history,
@@ -121,7 +123,7 @@ async def async_fetch_activity(
         )
     if not entity_ids:
         return []
-    start = datetime.now(UTC) - timedelta(days=ACTIVITY_LOOKBACK_DAYS)
+    start = datetime.now(UTC) - timedelta(hours=ACTIVITY_LOOKBACK_HOURS)
     try:
         changes = await hass.async_add_executor_job(
             history.state_changes_during_period,  # type: ignore[arg-type] # entity_id param: stubs say str, runtime takes str|list

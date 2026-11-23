@@ -169,7 +169,7 @@ def async_setup(hass: HomeAssistant) -> None:
         {
             "type": "phil9000/activity",
             vol.Optional("limit", default=DEFAULT_LIMIT): vol.All(
-                vol.Coerce(int), vol.Range(min=1, max=200)
+                vol.Coerce(int), vol.Range(min=1, max=2000)
             ),
         }
     )

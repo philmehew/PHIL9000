@@ -21,7 +21,11 @@ from __future__ import annotations
 
 from typing import Any
 
-DEFAULT_LIMIT = 25
+# Rows kept in the feed: the panel box shows ~25 rows visibly and scrolls,
+# but keeps a full recent history so re-opening the panel or scrolling back
+# still has context. ~1000 rows ≈ 150 KB of JSON over the websocket — cheap
+# on anything that runs Home Assistant.
+DEFAULT_LIMIT = 1000
 
 
 def dedupe_activity(rows: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:

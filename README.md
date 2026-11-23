@@ -45,7 +45,8 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
 
 - PHIL9000 observes the entities you selected and tallies matches. **Candidates never act.**
 
-- A **PHIL9000 sidebar panel** shows a live **Recent activity** feed (the newest 25 real
+- A **PHIL9000 sidebar panel** shows a live **Recent activity** feed (the last 3 hours,
+  up to 1000 real
   state changes on observed entities, read from Home Assistant's recorder — HA's single
   central activity log), plus learned behaviours with confidence, steps, schedule and
   last-fired evidence. From the panel you can confirm, dismiss, reopen, **rename**, edit

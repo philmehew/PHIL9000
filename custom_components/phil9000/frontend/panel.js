@@ -15,6 +15,10 @@
 
 const STATUS_RANK = { confirmed: 0, candidate: 1, dismissed: 2 };
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// Rows kept client-side: matches the backend feed cap. The visible box
+// shows ~25 rows and scrolls; the buffer keeps the last 3 hours of
+// context available without re-fetching.
+const FEED_MAX = 1000;
 
 const esc = (value) =>
   String(value ?? "").replace(
@@ -268,12 +272,12 @@ class Phil9000Panel extends HTMLElement {
         (row) => {
           if (this._paused) {
             this._pending.unshift(row);
-            this._pending = this._pending.slice(0, 250);
+            this._pending = this._pending.slice(0, FEED_MAX);
             this._updatePauseBtn();
             return;
           }
           this._activity.unshift(row);
-          this._activity = this._activity.slice(0, 25);
+          this._activity = this._activity.slice(0, FEED_MAX);
           this._activityHint = "";
           this._renderActivity();
         },
@@ -322,7 +326,7 @@ class Phil9000Panel extends HTMLElement {
     );
     this._activity = [...fetched, ...liveOnly]
       .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
-      .slice(0, 25);
+      .slice(0, FEED_MAX);
     this._renderActivity();
   }
 
@@ -347,7 +351,7 @@ class Phil9000Panel extends HTMLElement {
           <span class="act-change">${esc(row.old_state ?? "—")} → <b>${esc(row.new_state)}</b></span>
           <button class="secondary mute-btn" data-act="mute" data-entity="${esc(row.entity_id)}"
             ${this._readOnly ? "disabled" : ""}
-            title="Mute ${esc(row.entity_id)} — stop observing it (revert in Monitoring below)">⊘</button>
+            title="Mute ${esc(row.entity_id)} — stop observing it (revert in the Entities panel)">⊘</button>
         </li>`,
       )
       .join("")}</ul></div>`;
@@ -388,7 +392,7 @@ class Phil9000Panel extends HTMLElement {
   _togglePause() {
     this._paused = !this._paused;
     if (!this._paused && this._pending.length) {
-      this._activity = [...this._pending, ...this._activity].slice(0, 25);
+      this._activity = [...this._pending, ...this._activity].slice(0, FEED_MAX);
       this._pending = [];
       this._renderActivity();
     }

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.3 — 2026-11-23
+
+### Full-size, scrollable activity history
+
+- The Recent activity feed now covers the **last 3 hours**, capped at
+  **1000 rows** — not just the newest 25 events. The box keeps its fixed
+  ~25-row visible height and **scrolls** through the rest, and the buffer
+  survives Pause up to 1000 rows. Re-opening the panel shows the full
+  window again, read from the recorder.
+- Data budget: the 3-hour window keeps the single recorder query trivial;
+  1000 rows ≈ 150 KB of JSON over the websocket — cheap on anything that
+  runs Home Assistant. Anything older lives in HA's Logbook.
+
 ## v0.5.2 — 2026-11-23
 
 ### Panel polish
