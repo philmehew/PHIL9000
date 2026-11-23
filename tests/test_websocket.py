@@ -238,8 +238,8 @@ async def test_subscribe_activity_pushes_live_rows(hass: HomeAssistant, hass_ws_
     assert out["id"] == 8 and out["success"] is True
 
 
-async def test_live_rows_skip_startup_recoveries(hass: HomeAssistant, hass_ws_client) -> None:
-    """unavailable/unknown -> state is restart noise; -> unavailable is real."""
+async def test_live_rows_skip_availability_transitions(hass: HomeAssistant, hass_ws_client) -> None:
+    """Any transition to/from unavailable/unknown is device bookkeeping."""
     await setup_entry(hass)
     client = await hass_ws_client(hass)
 
@@ -252,12 +252,14 @@ async def test_live_rows_skip_startup_recoveries(hass: HomeAssistant, hass_ws_cl
     _fire_state_changed(
         hass, OFFICE, "on", "unavailable", datetime(2026, 11, 25, 8, 30, tzinfo=UTC)
     )
+    # A real change among the noise still pushes.
+    _fire_state_changed(hass, OFFICE, "on", "off", datetime(2026, 11, 25, 9, 0, tzinfo=UTC))
     await hass.async_block_till_done()
 
     push = await client.receive_json()
-    assert push["id"] == 7 and push["event"]["new_state"] == "unavailable"
+    assert push["id"] == 7 and push["event"]["new_state"] == "off"
 
-    # Recoveries pushed nothing: next message is our request's response.
+    # Nothing else queued: next message is our request's response.
     await client.send_json({"id": 8, "type": "phil9000/behaviours"})
     out = await client.receive_json()
     assert out["id"] == 8 and out["success"] is True

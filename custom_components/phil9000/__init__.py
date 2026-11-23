@@ -474,8 +474,8 @@ def _publish_activity(runtime: Phil9000Runtime, observation: Observation) -> Non
     """Push a live feed row to the panel's activity subscribers (best effort)."""
     if not runtime.activity_subscribers:
         return
-    if is_recovery({"old_state": observation.old_state}):
-        return  # entity coming back online, not household activity
+    if is_recovery({"old_state": observation.old_state, "new_state": observation.new_state}):
+        return  # availability bookkeeping, not household activity
     row = {
         "entity_id": observation.entity_id,
         "at": observation.timestamp.isoformat(),

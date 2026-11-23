@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.10 — 2026-11-23
+
+### Activity feed now hides availability noise in both directions
+
+- v0.5.9 dropped `unavailable/unknown → state` recoveries but kept
+  `state → unavailable` — which turned out to be the other half of the same
+  restart story (integrations mark entities unavailable as the old instance
+  tears down), leaving the feed full of `on → unavailable` walls.
+- Now **any** transition to or from `unavailable`/`unknown` is filtered from
+  the feed (backfill and live push), so it shows household state only.
+  Behaviour detection is unchanged: the engine still sees every change, and
+  HA's device/service pages remain the place for offline diagnostics.
+
 ## v0.5.9 — 2026-11-23
 
 ### Restart-noise filter for the activity feed

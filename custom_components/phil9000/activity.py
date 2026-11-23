@@ -27,17 +27,19 @@ from typing import Any
 # on anything that runs Home Assistant.
 DEFAULT_LIMIT = 1000
 
-# Transitions *out of* these states are not household activity: every HA
+# Transitions *involving* these states are not household activity: every HA
 # restart (and every device reconnect) marks restored entities unavailable /
 # unknown and then pushes their first real state, so the recorder fills with
-# "unavailable -> on" rows. Transitions *into* unavailable stay (a device
-# going offline is worth seeing).
+# "unavailable -> on" walls — and, when the old instance tears down, with
+# "on -> unavailable" ones. The user's feed is household behaviour, not
+# device bookkeeping: HA surfaces device errors elsewhere, and behaviour
+# detection still sees every state change (only the feed filters).
 RECOVERY_STATES = frozenset({"unavailable", "unknown"})
 
 
 def is_recovery(row: dict[str, Any]) -> bool:
-    """True for rows that are just an entity coming back, not activity."""
-    return row.get("old_state") in RECOVERY_STATES
+    """True for rows where either end is unavailable/unknown (device noise)."""
+    return row.get("old_state") in RECOVERY_STATES or row.get("new_state") in RECOVERY_STATES
 
 
 def dedupe_activity(rows: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
