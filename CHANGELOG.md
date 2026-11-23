@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.16 — 2026-11-23
+
+### Fix: formatjs MISSING_VALUE toast on the settings form
+
+- Home Assistant renders config-flow strings through formatjs (ICU), so
+  the literal `{summary}` in the custom-prompt field label was parsed as a
+  substitution variable and raised "intl string context variable 'summary'
+  was not provided" as a UI toast.
+- The label and both prompt validation errors are reworded to describe the
+  placeholders without literal braces. The prompt itself is unchanged:
+  `{summary}`, `{known}` and `{cap}` keep working exactly as before.
+
 ## v0.5.15 — 2026-11-23
 
 ### Wider search box in the Activities panel
