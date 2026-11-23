@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.15 — 2026-11-23
+
+### Wider search box in the Activities panel
+
+- The filter input grows from 160px to 230px so longer state names
+  (`unavailable`, `playing` with an entity prefix) are not cut off.
+
 ## v0.5.14 — 2026-11-23
 
 ### Search box in the Activities panel
