@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.2 — 2026-11-23
+
+### Panel polish
+
+- The **Recent activity** table is always full size — 25 rows tall (the
+  feed's cap) — instead of shrinking to the number of events. The layout is
+  stable whether the day was quiet or busy; a wrapped row (long entity id)
+  scrolls rather than stretching the card.
+
 ## v0.5.1 — 2026-11-23
 
 ### Panel polish + custom LLM prompt

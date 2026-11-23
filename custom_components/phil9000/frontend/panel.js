@@ -106,7 +106,11 @@ const STYLE = `
     .section { font-size: 14px; font-weight: 500; margin: 18px 0 8px;
                color: var(--secondary-text-color); text-transform: uppercase;
                letter-spacing: .05em; }
-    .act-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+    .act-list { list-style: none; margin: 0; padding: 0; font-size: 13px;
+                /* Full-size table: always 25 rows tall (the feed's cap),
+                   stable whether the day was quiet or busy. A wrapped row
+                   (long entity id) would exceed the budget, so it scrolls. */
+                height: calc(25 * 23px); box-sizing: border-box; overflow-y: auto; }
     .act-list li { display: flex; gap: 10px; padding: 3px 0; align-items: baseline;
                    border-bottom: 1px solid var(--divider-color); }
     .act-list li:last-child { border-bottom: none; }
