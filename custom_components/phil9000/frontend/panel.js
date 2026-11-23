@@ -133,6 +133,9 @@ const STYLE = `
     .section-head { display: flex; align-items: baseline; gap: 12px; }
     .section-head .section { margin-bottom: 0; }
     .section-head button { font-size: 12px; padding: 3px 12px; }
+    .feed-status { font-size: 12px; color: var(--secondary-text-color);
+                   margin: 4px 0 6px; }
+    .feed-status.error { color: var(--error-color, #db4437); }
     .top-grid { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
     #activity-col { flex: 3 1 430px; min-width: 320px; }
     #manage-col { flex: 2 1 340px; min-width: 300px; }
@@ -187,6 +190,7 @@ class Phil9000Panel extends HTMLElement {
     this._renaming = null; // behaviour_id while its name input is open
     this._activity = [];
     this._activityHint = "";
+    this._fetchInfo = null; // last recorder fetch result: row count, window
     this._paused = false; // live rows buffer while the user inspects the feed
     this._pending = [];
     this._analysing = false;
@@ -206,6 +210,7 @@ class Phil9000Panel extends HTMLElement {
         <div id="activity-col">
           <div class="section-head"><h2 class="section">Recent activity</h2>
             <button class="secondary" data-act="pause">Pause</button></div>
+          <p class="feed-status" id="feed-status"></p>
           <div id="activity"><div class="card"><ul class="act-list">
             <li class="empty">Loading…</li>
           </ul></div></div>
@@ -314,8 +319,17 @@ class Phil9000Panel extends HTMLElement {
       });
       fetched = result.items || [];
       this._activityHint = result.hint || "";
+      this._fetchInfo = {
+        count: fetched.length,
+        observed: result.observed,
+        entities: result.observed_entities,
+        hours: result.window_hours,
+        limit: result.limit,
+        error: "",
+      };
     } catch (err) {
       this._activityHint = err.message || String(err);
+      this._fetchInfo = { error: this._activityHint };
     }
     // Rows pushed live since subscribing may not be committed to the
     // recorder yet (it writes asynchronously): merge them in instead of
@@ -328,6 +342,24 @@ class Phil9000Panel extends HTMLElement {
       .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
       .slice(0, FEED_MAX);
     this._renderActivity();
+    this._renderFeedStatus();
+  }
+
+  _renderFeedStatus() {
+    const el = this.shadow.querySelector("#feed-status");
+    if (!el || !this._fetchInfo) return;
+    const info = this._fetchInfo;
+    if (info.error) {
+      el.classList.add("error");
+      el.textContent = `history query failed: ${info.error}`;
+      return;
+    }
+    el.classList.remove("error");
+    let text =
+      `history: ${info.count} of ${info.observed} observed entities, ` +
+      `last ${info.hours}h (cap ${info.limit})`;
+    if (info.entities && info.entities.length) text += ` · ${info.entities.join(", ")}`;
+    el.textContent = text;
   }
 
   _renderActivity() {

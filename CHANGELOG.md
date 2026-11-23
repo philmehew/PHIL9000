@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.5 — 2026-11-23
+
+### Activity feed diagnostics
+
+- The Recent activity card now shows a persistent status line:
+  **`history: N of M observed entities, last 3h (cap 1000)`** — plus the
+  observed entity list when it's short — so an empty or thin feed is
+  self-explanatory (query failed vs. genuinely few changes vs. few
+  observed entities) without reading server logs.
+- A failed history query now shows **`history query failed: <reason>`**
+  in red, instead of the hint vanishing on the first live row.
+
 ## v0.5.4 — 2026-11-23
 
 ### Fix: activity feed (and analysis history) silently empty since v0.4.8

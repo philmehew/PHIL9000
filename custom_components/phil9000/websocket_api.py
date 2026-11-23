@@ -179,16 +179,25 @@ def async_setup(hass: HomeAssistant) -> None:
     ) -> None:
         if _require(hass, connection, msg) is None:
             return
+        entities = _observed_entities(hass)
+        # Diagnostics the panel shows under the heading: when the feed looks
+        # wrong, "N rows / M entities / K h window" answers server-vs-config
+        # questions without reading logs.
+        info = {
+            "observed": len(entities),
+            "window_hours": analysis.ACTIVITY_LOOKBACK_HOURS,
+            "limit": msg["limit"],
+            # A short list is usually the real answer, so send it when small.
+            "observed_entities": entities if len(entities) <= 10 else None,
+        }
         try:
-            items = await analysis.async_fetch_activity(
-                hass, _observed_entities(hass), msg["limit"]
-            )
+            items = await analysis.async_fetch_activity(hass, entities, msg["limit"])
         except analysis.AnalysisUnavailableError as err:
             # Empty feed plus a hint (no recorder, or the entities are excluded
             # from it) is more useful to the panel than a hard error.
-            connection.send_result(msg["id"], {"items": [], "hint": str(err)})
+            connection.send_result(msg["id"], {"items": [], "hint": str(err), **info})
             return
-        connection.send_result(msg["id"], {"items": items})
+        connection.send_result(msg["id"], {"items": items, **info})
 
     @websocket_api.websocket_command({"type": "phil9000/subscribe_activity"})
     @websocket_api.async_response
