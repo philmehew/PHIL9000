@@ -133,6 +133,8 @@ const STYLE = `
     .section-head { display: flex; align-items: baseline; gap: 12px; }
     .section-head .section { margin-bottom: 0; }
     .section-head button { font-size: 12px; padding: 3px 12px; }
+    .section-head input { font-size: 12px; padding: 3px 8px; width: 160px;
+      margin-right: -4px; }
     .feed-status { font-size: 12px; color: var(--secondary-text-color);
                    margin-left: auto; text-align: right; }
     .feed-status.error { color: var(--error-color, #db4437); }
@@ -189,6 +191,7 @@ class Phil9000Panel extends HTMLElement {
     this._draft = []; // actions being edited (copy of stored actions)
     this._renaming = null; // behaviour_id while its name input is open
     this._activity = [];
+    this._activityFilter = ""; // live filter over the loaded feed rows
     this._activityHint = "";
     this._fetchInfo = null; // last recorder fetch result: row count, window
     this._paused = false; // live rows buffer while the user inspects the feed
@@ -208,6 +211,7 @@ class Phil9000Panel extends HTMLElement {
       <div class="top-grid">
         <div id="activity-col">
           <div class="section-head"><h2 class="section">Recent activity</h2>
+            <input class="activity-search" type="search" placeholder="Filter — entity or state…" />
             <button class="secondary" data-act="pause">Pause</button>
             <span class="feed-status" id="feed-status"></span></div>
           <div id="activity"><div class="card"><ul class="act-list">
@@ -236,6 +240,10 @@ class Phil9000Panel extends HTMLElement {
       if (ev.target.classList.contains("entity-search")) {
         this._entityFilter = ev.target.value.trim().toLowerCase();
         this._renderEntityList();
+      }
+      if (ev.target.classList.contains("activity-search")) {
+        this._activityFilter = ev.target.value.trim().toLowerCase();
+        this._renderActivity();
       }
     });
     this.shadow.addEventListener("change", (ev) => {
@@ -377,17 +385,33 @@ class Phil9000Panel extends HTMLElement {
   _renderActivity() {
     const el = this.shadow.querySelector("#activity");
     if (!el) return;
-    if (this._activity.length === 0) {
+    const q = this._activityFilter;
+    // Each whitespace-separated term must appear in the entity ID or either
+    // state — so "appletv playing" finds apple_tv rows that changed to/from
+    // playing, and a lone "appletv" behaves as a plain entity filter.
+    const rows = q
+      ? this._activity.filter((r) =>
+          q.split(/\s+/).every((t) =>
+            [r.entity_id, r.old_state ?? "", r.new_state ?? ""]
+              .join(" ")
+              .toLowerCase()
+              .includes(t),
+          ),
+        )
+      : this._activity;
+    if (rows.length === 0) {
       // The card frame is always present — an empty feed should look like
       // a card with a hint in it, not a collapsed hole in the layout.
-      const message = this._activityHint ||
-        "No state changes observed yet. Trigger a sensor (or use Developer Tools → " +
-          "Set State) and it should appear here within a second.";
+      const message = q
+        ? `No events for “${esc(q)}” in the last ${this._activity.length} feed rows.`
+        : this._activityHint ||
+          "No state changes observed yet. Trigger a sensor (or use Developer Tools → " +
+            "Set State) and it should appear here within a second.";
       el.innerHTML = `<div class="card"><ul class="act-list">
         <li class="empty">${esc(message)}</li></ul></div>`;
       return;
     }
-    el.innerHTML = `<div class="card"><ul class="act-list">${this._activity
+    el.innerHTML = `<div class="card"><ul class="act-list">${rows
       .map(
         (row) => `<li>
           <span class="act-time">${esc(formatClock(row.at))}</span>

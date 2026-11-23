@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.14 — 2026-11-23
+
+### Search box in the Activities panel
+
+- A filter box next to the Pause button narrows the loaded feed
+  (up to 1000 rows) live, as you type — no backend round-trips.
+- Terms are whitespace-separated and each must appear in the entity ID,
+  the old state, or the new state: `appletv` filters by entity,
+  `appletv playing` further narrows to transitions involving `playing`,
+  and `off` alone shows every off-transition across all entities.
+- Live events keep flowing through the active filter, and an empty
+  match shows which query ran over how many rows.
+
 ## v0.5.13 — 2026-11-23
 
 ### Feed is now "last 1000": 7-day lookback window
