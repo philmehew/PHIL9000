@@ -9,5 +9,5 @@
   "single_config_entry": true,
   "issue_tracker": "https://github.com/philmehew/PHIL9000/issues",
   "requirements": ["pyyaml>=6.0.3"],
-  "version": "0.4.6"
+  "version": "0.4.7"
 }

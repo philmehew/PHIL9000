@@ -60,7 +60,9 @@ const formatClock = (iso) => {
 
 const STYLE = `
   <style>
-    :host { display: block; padding: 16px; color: var(--primary-text-color);
+    /* Rendered in the light DOM (no shadow root), so :host would not
+       match — style the panel element by its tag instead. */
+    phil9000-panel { display: block; padding: 16px; color: var(--primary-text-color);
             font-family: Roboto, sans-serif; }
     header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
     header h1 { font-size: 20px; font-weight: 500; margin: 0; }

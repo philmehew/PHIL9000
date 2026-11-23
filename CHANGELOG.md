@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.7 — 2026-11-23
+
+### Panel inset
+
+- The panel content no longer sits flush against the sidebar edge. The
+  intended 16 px padding was declared with `:host`, which only matches
+  inside a shadow root — the panel renders in the light DOM, so it never
+  applied. Styled by element tag instead; the whole panel now has the
+  usual Home Assistant inset.
+
 ## v0.4.6 — 2026-11-22
 
 ### Analysis log panel
