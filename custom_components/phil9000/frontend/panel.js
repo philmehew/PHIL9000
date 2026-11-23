@@ -311,7 +311,7 @@ class Phil9000Panel extends HTMLElement {
     this._unsubscribes = [];
   }
 
-  async _reloadActivity() {
+  async _reloadActivity(replace) {
     let fetched = [];
     try {
       const result = await this._hass.connection.sendMessagePromise({
@@ -330,6 +330,17 @@ class Phil9000Panel extends HTMLElement {
     } catch (err) {
       this._activityHint = err.message || String(err);
       this._fetchInfo = { error: this._activityHint };
+    }
+    if (replace) {
+      // The observed set just changed (domains/entities): show exactly the
+      // new window, dropping rows for entities no longer observed. Live
+      // rows arrive via the subscription as before.
+      this._activity = fetched.slice(0, FEED_MAX);
+      this._pending = [];
+      this._updatePauseBtn();
+      this._renderActivity();
+      this._renderFeedStatus();
+      return;
     }
     // Rows pushed live since subscribing may not be committed to the
     // recorder yet (it writes asynchronously): merge them in instead of
@@ -490,7 +501,7 @@ class Phil9000Panel extends HTMLElement {
       this._render();
     }
     this._loadMonitoring();
-    this._reloadActivity();
+    this._reloadActivity(true);
   }
 
   _renderEntityList() {
@@ -541,7 +552,7 @@ class Phil9000Panel extends HTMLElement {
       this._render();
     }
     this._loadMonitoring();
-    this._reloadActivity();
+    this._reloadActivity(true);
   }
 
   async _analyse() {

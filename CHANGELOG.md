@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.5.6 — 2026-11-23
+
+### Fix: activity feed now follows observation changes
+
+- Changing observed **domains** or **entities** (and muting from the feed)
+  re-fetches the history in **replace** mode: the table now shows exactly
+  the new observed set's 3-hour window. Previously the fetch *merged* into
+  the old list, so rows for entities you had just stopped observing stayed
+  on screen and the panel looked unrefreshed.
+- The Pause buffer is cleared on observation changes too (it could
+  re-inject rows for un-observed entities on resume).
+- The header **Refresh** button keeps merge mode (re-sync without losing
+  uncommitted live rows) — unchanged behaviour.
+
 ## v0.5.5 — 2026-11-23
 
 ### Activity feed diagnostics
