@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.17 — 2026-11-23
+
+### Settings form: prompt label split into label + helper text
+
+- The field label above the prompt textarea carried the full placeholder
+  explanation, which — given the multiline layout — looked like a stray
+  message box. It is now just "Custom LLM prompt (blank = built-in)",
+  with "Placeholders in curly braces: summary (required), known, cap."
+  rendered as helper text below the field (HA's `data_descriptions`).
+
 ## v0.5.16 — 2026-11-23
 
 ### Fix: formatjs MISSING_VALUE toast on the settings form

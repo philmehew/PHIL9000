@@ -27,7 +27,10 @@
           "cooldown_default": "Default cooldown between detections (seconds)",
           "analysis_enabled": "Run nightly pattern analysis (optional, off by default)",
           "analysis_days": "Days of history to analyse",
-          "custom_prompt": "Custom LLM prompt (blank = built-in). Wrap placeholder names in curly braces: summary (required), known, cap."
+          "custom_prompt": "Custom LLM prompt (blank = built-in)"
+        },
+        "data_descriptions": {
+          "custom_prompt": "Placeholders in curly braces: summary (required), known, cap."
         }
       }
     },
