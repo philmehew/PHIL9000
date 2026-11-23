@@ -313,3 +313,30 @@ async def test_subscription_changes_apply_in_place_without_reload(hass: HomeAssi
     # The swap is effective immediately: the muted entity stops being observed.
     await fire_evening(hass, day=25)
     assert detections == []
+
+
+async def test_services_reject_non_admin_users(hass: HomeAssistant, hass_read_only_user) -> None:
+    """Amending via services is admin-only; internal (userless) calls pass."""
+    from homeassistant.core import Context
+    from homeassistant.exceptions import Unauthorized
+
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+
+    payloads = {
+        SERVICE_CONFIRM_BEHAVIOUR: {"behaviour_id": "end_of_work_day"},
+        SERVICE_DISMISS_BEHAVIOUR: {"behaviour_id": "end_of_work_day"},
+        SERVICE_RUN_ANALYSIS: {},
+    }
+    for service, data in payloads.items():
+        with pytest.raises(Unauthorized):
+            await hass.services.async_call(
+                DOMAIN,
+                service,
+                data,
+                blocking=True,
+                context=Context(user_id=hass_read_only_user.id),
+            )
+
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    assert runtime.engine.behaviours["end_of_work_day"].status is BehaviourStatus.CONFIRMED

@@ -76,6 +76,13 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
 - You can also confirm or dismiss from *Developer Tools → Actions* (or a script):
   `phil9000.confirm_behaviour` / `phil9000.dismiss_behaviour` with `behaviour_id`.
 
+- **Admin-only changes.** Confirmed behaviours execute service calls, so anything that
+  amends PHIL9000 — confirm/dismiss/rename, editing actions, subscriptions and mutes,
+  running the LLM analysis — requires an **admin** user. Everyone else gets a read-only
+  panel (feeds, behaviours and monitoring stay visible; the change controls are
+  disabled) and an `unauthorized` error if they try from a script. Automations calling
+  the services internally (no user) are unaffected.
+
 - Confirmed behaviours fire the `phil9000_behaviour_detected` event and execute their
   actions (HA service calls defined in the YAML) — deterministic Python, no LLM.
 

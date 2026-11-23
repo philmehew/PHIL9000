@@ -63,12 +63,27 @@ def async_setup(hass: HomeAssistant) -> None:
     )
 
     def _require(
-        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+        hass: HomeAssistant,
+        connection: ActiveConnection,
+        msg: dict[str, Any],
+        *,
+        admin: bool = False,
     ) -> Phil9000Runtime | None:
-        """The runtime for this message, or None after sending not-loaded."""
+        """The runtime for this message, or None after sending the right error.
+
+        ``admin`` gates commands that amend settings: confirmed behaviours
+        run service calls with the integration's authority, so only admin
+        users may define or trigger them.
+        """
         runtime = current_runtime(hass)
         if runtime is None:
             connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+            return None
+        if admin and (connection.user is None or not connection.user.is_admin):
+            connection.send_error(
+                msg["id"], websocket_api.ERR_UNAUTHORIZED, "PHIL9000 requires an admin user"
+            )
+            return None
         return runtime
 
     @websocket_api.websocket_command({"type": "phil9000/behaviours"})
@@ -104,7 +119,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_set_status(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        if (runtime := _require(hass, connection, msg)) is None:
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
             return
         try:
             await runtime.async_set_status(
@@ -135,7 +150,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_set_actions(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        if (runtime := _require(hass, connection, msg)) is None:
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
             return
         actions = [
             BehaviourAction(
@@ -230,7 +245,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_run_analysis(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        if (runtime := _require(hass, connection, msg)) is None:
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
             return
         entry = _entry(hass)
         try:
@@ -252,7 +267,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_set_name(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        if (runtime := _require(hass, connection, msg)) is None:
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
             return
         try:
             await runtime.async_rename(hass, msg[ATTR_BEHAVIOUR_ID], msg["name"].strip())
@@ -313,7 +328,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def _async_set_mute(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any], *, mute: bool
     ) -> None:
-        if _require(hass, connection, msg) is None:
+        if _require(hass, connection, msg, admin=True) is None:
             return
         entry = _entry(hass)
         entity_id = msg["entity_id"].strip().lower()
@@ -355,7 +370,7 @@ def async_setup(hass: HomeAssistant) -> None:
                          mute it (domain coverage alone would keep it live).
         Anything not observed stays untouched (no phantom mutes).
         """
-        if (runtime := _require(hass, connection, msg)) is None:
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
             return
         entry = _entry(hass)
         entity_id = msg["entity_id"].strip().lower()
@@ -398,7 +413,7 @@ def async_setup(hass: HomeAssistant) -> None:
         Explicit entity ids added from the panel survive untouched, as do the
         exclusions; only the bare-domain specs are replaced. Applies in place.
         """
-        if _require(hass, connection, msg) is None:
+        if _require(hass, connection, msg, admin=True) is None:
             return
         entry = _entry(hass)
         wanted = {domain.strip().lower() for domain in msg["domains"]}

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.9 — 2026-11-23
+
+### Admin-only amendments
+
+- Confirmed behaviours run service calls with the integration's authority,
+  so anything that **amends** PHIL9000 now requires an **admin** user:
+  confirming/dismissing/renaming, editing actions, subscriptions and
+  per-entity mutes, and running the LLM analysis (websocket commands reject
+  with `unauthorized`; the services raise `Unauthorized`).
+- Reads stay open to everyone — the panel, activity feed, analysis log and
+  monitoring view work for non-admin users, who now see a **read-only**
+  panel: change buttons and checkboxes are disabled and the header notes
+  the admin requirement.
+- Automations calling the services without a user (internal calls) are
+  unaffected.
+
 ## v0.4.8 — 2026-11-23
 
 ### Code review round: efficiency, leak and dead-code fixes

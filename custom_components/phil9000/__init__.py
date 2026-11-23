@@ -484,8 +484,19 @@ def _status_service_handler(hass: HomeAssistant, entry: ConfigEntry, status: Beh
     async def handle(call: ServiceCall) -> None:
         from homeassistant.exceptions import (  # function-local: purity guard
             ServiceValidationError,
+            Unauthorized,
         )
 
+        # Confirm/dismiss decide whether PHIL9000 acts; run_analysis rewrites
+        # candidate definitions. Actions execute with the integration's
+        # authority, so only admin users may amend. System calls (no user)
+        # stay allowed for automations.
+        user_id = call.context.user_id
+        if user_id is not None:
+            user = await hass.auth.async_get_user(user_id)
+            if user is None or not user.is_admin:
+                _LOGGER.warning("Rejected %s call by non-admin user %s", DOMAIN, user_id)
+                raise Unauthorized(call.context)
         runtime: Phil9000Runtime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         if runtime is None:
             raise ServiceValidationError("PHIL9000 is not loaded")
@@ -511,8 +522,16 @@ def _run_analysis_service_handler(hass: HomeAssistant, entry: ConfigEntry):  # n
     async def handle(call: ServiceCall) -> None:  # noqa: ARG001
         from homeassistant.exceptions import (  # function-local: purity guard
             ServiceValidationError,
+            Unauthorized,
         )
 
+        if call.context.user_id is not None:
+            user = await hass.auth.async_get_user(call.context.user_id)
+            if user is None or not user.is_admin:
+                _LOGGER.warning(
+                    "Rejected %s call by non-admin user %s", DOMAIN, call.context.user_id
+                )
+                raise Unauthorized(call.context)
         runtime: Phil9000Runtime | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         if runtime is None:
             raise ServiceValidationError("PHIL9000 is not loaded")

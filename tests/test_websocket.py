@@ -531,3 +531,43 @@ async def test_set_domains_swaps_checklist_and_keeps_panel_specs(
     out = await _send(client, 3, {"type": "phil9000/set_domains", "domains": ["bogus_domain"]})
     assert out["success"] is False
     assert out["error"]["code"] == "invalid_format"
+
+
+# -- admin gating ----------------------------------------------------------------
+
+
+async def test_mutating_commands_require_admin(
+    hass: HomeAssistant, hass_ws_client, hass_read_only_access_token
+) -> None:
+    """Reads stay open; anything that amends needs an admin user."""
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    # Reads work for everyone.
+    out = await _send(client, 1, {"type": "phil9000/behaviours"})
+    assert out["success"] is True
+    assert out["result"]["behaviours"][0]["status"] == "confirmed"
+    out = await _send(client, 2, {"type": "phil9000/monitoring"})
+    assert out["success"] is True
+
+    mutations: list[dict] = [
+        {"type": "phil9000/set_status", "behaviour_id": "end_of_work_day", "status": "dismissed"},
+        {"type": "phil9000/set_name", "behaviour_id": "end_of_work_day", "name": "Nope"},
+        {"type": "phil9000/set_actions", "behaviour_id": "end_of_work_day", "actions": []},
+        {"type": "phil9000/mute_entity", "entity_id": OFFICE},
+        {"type": "phil9000/unmute_entity", "entity_id": OFFICE},
+        {"type": "phil9000/set_observed", "entity_id": OFFICE, "observed": False},
+        {"type": "phil9000/set_domains", "domains": ["switch"]},
+        {"type": "phil9000/run_analysis"},
+    ]
+    for i, payload in enumerate(mutations, start=3):
+        out = await _send(client, i, payload)
+        assert out["success"] is False, payload
+        assert out["error"]["code"] == "unauthorized", payload
+
+    # And nothing actually changed.
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    assert runtime.engine.behaviours["end_of_work_day"].status is BehaviourStatus.CONFIRMED
+    assert entry.data == {CONF_ENTITIES: [OFFICE, KITCHEN]}
+    assert not entry.data.get(CONF_EXCLUDE_ENTITIES)

@@ -177,9 +177,12 @@ class Phil9000Panel extends HTMLElement {
     this._analysisLog = null; // entries from phil9000/analysis_log (newest first)
     this._monitoring = null;
     this._entityFilter = "";
+    // Confirmed behaviours execute service calls, so amending them (and
+    // subscriptions/analysis) is admin-only on the backend; reflect that.
+    this._readOnly = hass.user && hass.user.is_admin === false;
 
     this.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
-      <button data-act="analyse" ${this._analysing ? "disabled" : ""}>Analyse now</button>
+      <button data-act="analyse" ${this._analysing || this._readOnly ? "disabled" : ""}>Analyse now</button>
       <button class="secondary" data-act="refresh">Refresh</button></header>
       <p class="meta"></p><div id="banner"></div>
       <div class="top-grid">
@@ -315,6 +318,7 @@ class Phil9000Panel extends HTMLElement {
           <span class="act-entity">${esc(row.entity_id)}</span>
           <span class="act-change">${esc(row.old_state ?? "—")} → <b>${esc(row.new_state)}</b></span>
           <button class="secondary mute-btn" data-act="mute" data-entity="${esc(row.entity_id)}"
+            ${this._readOnly ? "disabled" : ""}
             title="Mute ${esc(row.entity_id)} — stop observing it (revert in Monitoring below)">⊘</button>
         </li>`,
       )
@@ -399,6 +403,7 @@ class Phil9000Panel extends HTMLElement {
       .map(
         (d) => `<label class="ent-row" ${d.hint ? `title="${esc(d.hint)}"` : ""}>
           <input type="checkbox" data-act="set-domain" data-domain="${esc(d.value)}"
+            ${this._readOnly ? "disabled" : ""}
             ${checked.has(d.value) ? "checked" : ""} />
           <span>${esc(d.label)}</span>
         </label>`,
@@ -441,6 +446,7 @@ class Phil9000Panel extends HTMLElement {
         .map(
           (e) => `<label class="ent-row">
             <input type="checkbox" data-act="set-observed" data-entity="${esc(e)}"
+              ${this._readOnly ? "disabled" : ""}
               ${observed.has(e) ? "checked" : ""} />
             <span>${esc(e)}</span>
             ${explicit.has(e) ? '<code class="mini-chip">added</code>' : ""}
@@ -633,11 +639,12 @@ class Phil9000Panel extends HTMLElement {
       (this._error ? `<div class="error">${esc(this._error)}</div>` : "") +
       (this._analysisNote ? `<div class="note">${esc(this._analysisNote)}</div>` : "");
     const analyseBtn = this.querySelector('[data-act="analyse"]');
-    if (analyseBtn) analyseBtn.disabled = this._analysing || this._busy;
+    if (analyseBtn) analyseBtn.disabled = this._analysing || this._busy || this._readOnly;
     const meta = this.querySelector(".meta");
     const entities = (this._meta.observed_entities || []).length;
     meta.innerHTML =
-      `Observing <code>${entities}</code> entities · behaviours stored in <code>${esc(this._meta.path)}</code>`;
+      `Observing <code>${entities}</code> entities · behaviours stored in <code>${esc(this._meta.path)}</code>` +
+      (this._readOnly ? ` · <b>read-only</b> — sign in as an admin to make changes` : "");
 
     const body = this.querySelector("#body");
     if (!this._behaviours) return;
@@ -704,19 +711,21 @@ class Phil9000Panel extends HTMLElement {
     }
 
     const buttons = [];
+    const locked = this._busy || this._readOnly;
+    const editing = this._busy || this._editing || this._readOnly;
     if (this._renaming === b.id) {
-      buttons.push(`<button data-act="save-name" data-id="${esc(b.id)}" ${this._busy ? "disabled" : ""}>Save name</button>`);
+      buttons.push(`<button data-act="save-name" data-id="${esc(b.id)}" ${locked ? "disabled" : ""}>Save name</button>`);
       buttons.push(`<button class="secondary" data-act="cancel-name">Cancel</button>`);
     } else {
-      buttons.push(`<button class="secondary" data-act="rename" data-id="${esc(b.id)}" ${this._busy || this._editing ? "disabled" : ""}>Rename</button>`);
+      buttons.push(`<button class="secondary" data-act="rename" data-id="${esc(b.id)}" ${editing ? "disabled" : ""}>Rename</button>`);
     }
     if (b.status !== "confirmed")
-      buttons.push(`<button data-act="confirm" data-id="${esc(b.id)}" ${this._busy ? "disabled" : ""}>Confirm</button>`);
+      buttons.push(`<button data-act="confirm" data-id="${esc(b.id)}" ${locked ? "disabled" : ""}>Confirm</button>`);
     if (b.status !== "dismissed")
-      buttons.push(`<button class="danger" data-act="dismiss" data-id="${esc(b.id)}" ${this._busy ? "disabled" : ""}>Dismiss</button>`);
+      buttons.push(`<button class="danger" data-act="dismiss" data-id="${esc(b.id)}" ${locked ? "disabled" : ""}>Dismiss</button>`);
     if (b.status === "dismissed")
-      buttons.push(`<button class="secondary" data-act="reopen" data-id="${esc(b.id)}" ${this._busy ? "disabled" : ""}>Reopen</button>`);
-    buttons.push(`<button class="secondary" data-act="edit-actions" data-id="${esc(b.id)}" ${this._busy || this._editing ? "disabled" : ""}>Edit actions</button>`);
+      buttons.push(`<button class="secondary" data-act="reopen" data-id="${esc(b.id)}" ${locked ? "disabled" : ""}>Reopen</button>`);
+    buttons.push(`<button class="secondary" data-act="edit-actions" data-id="${esc(b.id)}" ${editing ? "disabled" : ""}>Edit actions</button>`);
     parts.push(`<div class="row">${buttons.join("")}</div></div>`);
     return parts.join("");
   }
