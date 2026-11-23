@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.8 — 2026-11-23
+
+### Panel polish + a "sending to the LLM" log line
+
+- The `history: …` status text now sits **inline to the right of the
+  Pause button** instead of its own line under the heading.
+- A new Analysis log entry appears **before the prompt is sent to the
+  conversation agent** — `Sending the summary to <agent> — LLM analysis
+  can take a few minutes; results appear here when it replies` — so a
+  long wait during a run is explained while it happens, not after.
+  Pushed live to open panels like every other log line.
+
 ## v0.5.7 — 2026-11-23
 
 ### Removed the Refresh button

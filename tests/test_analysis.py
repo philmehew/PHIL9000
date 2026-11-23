@@ -271,6 +271,13 @@ async def test_analysis_log_records_a_readable_run(hass: HomeAssistant) -> None:
     messages = [e["message"] for e in runtime.analysis_log]
     assert messages[0] == "Run started (manual)"
     assert any(m.startswith("Collected 3 state changes from 2 entities") for m in messages)
+    # The user sees what's about to happen (and that waiting is normal)
+    # before the slow LLM call starts.
+    sending = next(m for m in messages if m.startswith("Sending the summary to"))
+    assert "can take a few minutes" in sending
+    assert messages.index(sending) > messages.index(
+        next(m for m in messages if m.startswith("Collected"))
+    )
     assert messages[-1].startswith("Finished in ")
     assert "proposed Evening handoff" in messages[-1]
     assert all(e["level"] == "info" for e in runtime.analysis_log)

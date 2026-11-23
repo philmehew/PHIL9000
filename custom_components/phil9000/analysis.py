@@ -323,8 +323,15 @@ async def _async_analysis_pass(
         existing,
         (entry.options.get(OPTION_CUSTOM_PROMPT) or "").strip() or None,
     )
+    agent_id = entry.options.get(OPTION_AGENT_ID)
+    _log_run(
+        runtime,
+        "info",
+        f"Sending the summary to {agent_id or 'the default conversation agent'} — "
+        "LLM analysis can take a few minutes; results appear here when it replies",
+    )
     try:
-        reply = await call(hass, entry.options.get(OPTION_AGENT_ID), prompt)
+        reply = await call(hass, agent_id, prompt)
     except Exception as err:  # noqa: BLE001 — surface as a friendly service error
         raise AnalysisUnavailableError(f"conversation agent call failed: {err}") from err
 

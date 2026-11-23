@@ -133,8 +133,7 @@ const STYLE = `
     .section-head { display: flex; align-items: baseline; gap: 12px; }
     .section-head .section { margin-bottom: 0; }
     .section-head button { font-size: 12px; padding: 3px 12px; }
-    .feed-status { font-size: 12px; color: var(--secondary-text-color);
-                   margin: 4px 0 6px; }
+    .feed-status { font-size: 12px; color: var(--secondary-text-color); }
     .feed-status.error { color: var(--error-color, #db4437); }
     .top-grid { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
     #activity-col { flex: 3 1 430px; min-width: 320px; }
@@ -208,8 +207,8 @@ class Phil9000Panel extends HTMLElement {
       <div class="top-grid">
         <div id="activity-col">
           <div class="section-head"><h2 class="section">Recent activity</h2>
-            <button class="secondary" data-act="pause">Pause</button></div>
-          <p class="feed-status" id="feed-status"></p>
+            <button class="secondary" data-act="pause">Pause</button>
+            <span class="feed-status" id="feed-status"></span></div>
           <div id="activity"><div class="card"><ul class="act-list">
             <li class="empty">Loading…</li>
           </ul></div></div>
