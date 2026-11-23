@@ -9,6 +9,7 @@ agent are injected-able for deterministic tests.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -49,10 +50,19 @@ class AnalysisUnavailableError(Exception):
     """Raised when a run cannot proceed (no recorder, no history, agent error)."""
 
 
+# A hung conversation agent must not hold the in-flight guard until restart.
+AGENT_TIMEOUT_SECONDS = 600
+
+
 async def async_collect_history(
     hass: HomeAssistant, entity_ids: list[str], days: int
 ) -> dict[str, list[tuple[datetime, str]]]:
-    """State-change history per entity, read from HA's recorder."""
+    """State-change history per entity, read from HA's recorder.
+
+    One recorder query for the whole entity list: whole-domain subscriptions
+    can mean hundreds of entities, and a query per entity (the old shape)
+    meant hundreds of database round-trips per analysis run.
+    """
     from homeassistant.components.recorder import (  # function-local: purity guard
         history,
     )
@@ -62,24 +72,26 @@ async def async_collect_history(
             "the recorder/history integration is not available, so PHIL9000 has "
             "no history to analyse"
         )
+    if not entity_ids:
+        return {}
     start = datetime.now(UTC) - timedelta(days=days)
+    try:
+        changes = await hass.async_add_executor_job(
+            history.state_changes_during_period,  # type: ignore[arg-type] # entity_id param: stubs say str, runtime takes str|list
+            hass,
+            start,
+            None,
+            entity_ids,
+            True,  # no_attributes
+            False,  # descending
+            None,  # limit
+            False,  # include_start_time_state
+        )
+    except Exception:  # noqa: BLE001 — surface as a friendly service error
+        _LOGGER.debug("Could not read history", exc_info=True)
+        return {}
     events_by_entity: dict[str, list[tuple[datetime, str]]] = {}
     for entity_id in entity_ids:
-        try:
-            changes = await hass.async_add_executor_job(
-                history.state_changes_during_period,
-                hass,
-                start,
-                None,
-                entity_id,
-                True,  # no_attributes
-                False,  # descending
-                None,  # limit
-                False,  # include_start_time_state
-            )
-        except Exception:  # noqa: BLE001 — one bad entity must not sink the run
-            _LOGGER.debug("Could not read history for %s", entity_id, exc_info=True)
-            continue
         states = changes.get(entity_id, [])
         if states:
             events_by_entity[entity_id] = [(state.last_changed, state.state) for state in states]
@@ -106,24 +118,26 @@ async def async_fetch_activity(
         raise AnalysisUnavailableError(
             "the recorder/history integration is not available, so PHIL9000 has no activity to show"
         )
+    if not entity_ids:
+        return []
     start = datetime.now(UTC) - timedelta(days=ACTIVITY_LOOKBACK_DAYS)
+    try:
+        changes = await hass.async_add_executor_job(
+            history.state_changes_during_period,  # type: ignore[arg-type] # entity_id param: stubs say str, runtime takes str|list
+            hass,
+            start,
+            None,
+            entity_ids,
+            True,  # no_attributes
+            True,  # descending: newest first
+            limit,
+            False,  # include_start_time_state
+        )
+    except Exception:  # noqa: BLE001 — an unreadable recorder must not sink the feed
+        _LOGGER.debug("Could not read activity", exc_info=True)
+        return []
     rows: list[dict[str, Any]] = []
     for entity_id in entity_ids:
-        try:
-            changes = await hass.async_add_executor_job(
-                history.state_changes_during_period,
-                hass,
-                start,
-                None,
-                entity_id,
-                True,  # no_attributes
-                True,  # descending: newest first
-                limit,
-                False,  # include_start_time_state
-            )
-        except Exception:  # noqa: BLE001 — one bad entity must not sink the feed
-            _LOGGER.debug("Could not read activity for %s", entity_id, exc_info=True)
-            continue
         states = changes.get(entity_id, [])
         for index, state in enumerate(states):
             older = states[index + 1] if index + 1 < len(states) else None
@@ -150,13 +164,23 @@ def _dig(data: object, *keys: str) -> Any:
 
 
 async def async_call_agent(hass: HomeAssistant, agent_id: str | None, prompt: str) -> str:
-    """Ask the household's conversation agent (no API keys of our own)."""
+    """Ask the household's conversation agent (no API keys of our own).
+
+    Bounded: a hung agent call would otherwise hold the in-flight guard
+    (and block every later run) until Home Assistant restarts.
+    """
     payload: dict[str, Any] = {"text": prompt}
     if agent_id:
         payload["agent_id"] = agent_id
-    response = await hass.services.async_call(
-        "conversation", "process", payload, blocking=True, return_response=True
-    )
+    try:
+        async with asyncio.timeout(AGENT_TIMEOUT_SECONDS):
+            response = await hass.services.async_call(
+                "conversation", "process", payload, blocking=True, return_response=True
+            )
+    except TimeoutError:
+        raise AnalysisUnavailableError(
+            f"conversation agent call timed out after {AGENT_TIMEOUT_SECONDS // 60} minutes"
+        ) from None
     # response shape: {"response": {"speech": {"plain": {"speech": "..."}}}}
     return str(_dig(response, "response", "speech", "plain", "speech") or "")
 

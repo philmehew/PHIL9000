@@ -84,8 +84,6 @@ CONF_ENTITIES = "entities"
 # Entry data: domains and/or entity ids to observe; excluded drops entities
 # from whole-domain subscriptions ("never observe these").
 CONF_EXCLUDE_ENTITIES = "exclude_entities"
-# Config-flow form key: individual entities added alongside domains.
-CONF_ENTITY_IDS = "entity_ids"
 
 # Config entry options
 OPTION_AGENT_ID = "agent_id"

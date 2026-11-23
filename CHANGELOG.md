@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.4.8 — 2026-11-23
+
+### Code review round: efficiency, leak and dead-code fixes
+
+- **Recorder reads are batched**: the activity feed and the analysis run
+  queried HA's history once *per entity* — with whole-domain subscriptions
+  that meant hundreds of database round-trips per panel load. Both now make
+  a single query for the whole observed list.
+- **Panel subscriptions no longer leak**: HA keeps one websocket connection,
+  so every visit to the sidebar panel used to add another set of live
+  subscriptions that kept firing on the detached panel forever. Subscriptions
+  are now dropped in `disconnectedCallback`.
+- **The action editor survives background refreshes**: a behaviour detected
+  mid-editing used to re-render the card list and wipe whatever you were
+  typing. Editor inputs are now harvested before any re-render, and the
+  rename box keeps its typed text.
+- **Hung agent calls time out** after 10 minutes instead of holding the
+  in-flight guard until Home Assistant restarts.
+- **The options update listener reloads via a fire-and-forget task** per
+  HA's documented pattern, instead of awaiting a reload from inside the
+  listener.
+- **14 copies of the websocket "not loaded" guard** collapsed into one
+  `_require()` helper; the dead legacy `parse_proposals()` API and the
+  unused `CONF_ENTITY_IDS` constant are removed (tests now exercise the
+  same pipeline through `parse_analysis_reply`).
+
 ## v0.4.7 — 2026-11-23
 
 ### Panel inset

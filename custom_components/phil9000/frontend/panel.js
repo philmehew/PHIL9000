@@ -230,36 +230,58 @@ class Phil9000Panel extends HTMLElement {
       }
     });
 
-    hass.connection.subscribeEvents(
-      () => this._refresh(),
-      "phil9000_behaviour_detected",
+    // HA's frontend keeps one websocket connection, so subscriptions made
+    // here must be dropped when the panel unmounts — otherwise every visit
+    // to the panel adds another set of live callbacks (and one more
+    // phil9000/behaviours fetch per event) that never stop firing.
+    this._unsubscribes = [];
+    this._unsubscribes.push(
+      hass.connection.subscribeEvents(
+        () => this._refresh(),
+        "phil9000_behaviour_detected",
+      ),
     );
-    hass.connection.subscribeMessage(
-      (row) => {
-        if (this._paused) {
-          this._pending.unshift(row);
-          this._pending = this._pending.slice(0, 250);
-          this._updatePauseBtn();
-          return;
-        }
-        this._activity.unshift(row);
-        this._activity = this._activity.slice(0, 25);
-        this._activityHint = "";
-        this._renderActivity();
-      },
-      { type: "phil9000/subscribe_activity" },
-    ).catch(() => {});
-    hass.connection.subscribeMessage(
-      (entry) => {
-        this._analysisLog = [entry, ...(this._analysisLog || [])].slice(0, 50);
-        this._renderAnalysisLog();
-      },
-      { type: "phil9000/subscribe_analysis_log" },
-    ).catch(() => {});
+    const track = (promise) => {
+      promise.catch(() => {}); // a failed subscribe must not leak as unhandled
+      this._unsubscribes.push(promise);
+    };
+    track(
+      hass.connection.subscribeMessage(
+        (row) => {
+          if (this._paused) {
+            this._pending.unshift(row);
+            this._pending = this._pending.slice(0, 250);
+            this._updatePauseBtn();
+            return;
+          }
+          this._activity.unshift(row);
+          this._activity = this._activity.slice(0, 25);
+          this._activityHint = "";
+          this._renderActivity();
+        },
+        { type: "phil9000/subscribe_activity" },
+      ),
+    );
+    track(
+      hass.connection.subscribeMessage(
+        (entry) => {
+          this._analysisLog = [entry, ...(this._analysisLog || [])].slice(0, 50);
+          this._renderAnalysisLog();
+        },
+        { type: "phil9000/subscribe_analysis_log" },
+      ),
+    );
     this._refresh();
     this._reloadActivity();
     this._loadAnalysisLog();
     this._loadMonitoring();
+  }
+
+  disconnectedCallback() {
+    (this._unsubscribes || []).forEach((promise) => {
+      promise.then((unsub) => unsub && unsub()).catch(() => {});
+    });
+    this._unsubscribes = [];
   }
 
   async _reloadActivity() {
@@ -621,10 +643,16 @@ class Phil9000Panel extends HTMLElement {
     if (!this._behaviours) return;
     if (this._behaviours.length === 0) {
       body.innerHTML = `<p class="empty">No behaviours learned yet. PHIL9000 is observing your
-        entities and will suggest patterns as it notices them. You can also add
+        entities and will suggest patterns as it learns. You can also add
         candidate behaviours directly to the YAML file above.</p>`;
       return;
     }
+    // A background refresh (live event, another command) must not wipe what
+    // the user is typing: harvest the editor inputs first, and restore the
+    // rename box's typed text after the re-render.
+    if (this._editing) this._collectDraft();
+    const openNameInput = this.querySelector(".name-input");
+    const typedName = this._renaming && openNameInput ? openNameInput.value : null;
     const sorted = [...this._behaviours].sort(
       (a, b) =>
         STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
@@ -635,6 +663,7 @@ class Phil9000Panel extends HTMLElement {
     if (this._renaming) {
       const input = body.querySelector(".name-input");
       if (input) {
+        if (typedName !== null) input.value = typedName;
         input.focus();
         input.select();
       }

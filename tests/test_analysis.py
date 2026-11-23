@@ -7,11 +7,12 @@ on disk.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 
 import pytest
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.phil9000.analysis import (
@@ -222,6 +223,27 @@ async def test_nightly_option_setups_cleanly(hass: HomeAssistant) -> None:
     seed_behaviours(hass, end_of_work_day())
     entry = await setup_entry(hass, options={OPTION_ANALYSIS_ENABLED: True})
     assert entry.entry_id in hass.data[DOMAIN]
+
+
+async def test_agent_call_times_out_and_frees_the_guard(hass: HomeAssistant, monkeypatch) -> None:
+    """A hung conversation agent must not hold the in-flight guard forever."""
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+
+    async def hang(call):  # noqa: ANN001, ARG001
+        await asyncio.sleep(5)
+
+    hass.services.async_register(
+        "conversation", "process", hang, supports_response=SupportsResponse.ONLY
+    )
+    monkeypatch.setattr("custom_components.phil9000.analysis.AGENT_TIMEOUT_SECONDS", 0.05)
+
+    with pytest.raises(AnalysisUnavailableError, match="timed out"):
+        await async_run_analysis(hass, entry, runtime, history_provider=_fake_history, notify=False)
+    await hass.async_block_till_done()
+    assert not runtime.analysis_running  # later runs are not blocked
+    assert runtime.analysis_log[-1]["level"] == "error"
 
 
 # -- the analysis run log (panel's "Analysis log" card) -------------------------

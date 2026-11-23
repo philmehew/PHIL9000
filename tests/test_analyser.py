@@ -15,7 +15,6 @@ from custom_components.phil9000.analyser import (
     behaviour_signature,
     build_prompt,
     parse_analysis_reply,
-    parse_proposals,
     summarise_history,
 )
 from custom_components.phil9000.models import Behaviour, BehaviourStatus, BehaviourStep
@@ -23,6 +22,15 @@ from custom_components.phil9000.seed import end_of_work_day
 
 OFFICE = "binary_sensor.office_presence"
 KITCHEN = "binary_sensor.kitchen_presence"
+
+
+def parse_new(text: str, existing: list[Behaviour] | None = None) -> list[Behaviour]:
+    """New proposals from a raw (possibly legacy-array) reply.
+
+    The old parse_new() API is gone; these tests exercise the same
+    extraction/validation/dedupe pipeline through the refinement parser.
+    """
+    return parse_analysis_reply(text, existing or []).new
 
 
 def _events(day_offsets=3):
@@ -89,7 +97,7 @@ def _proposal_json(**overrides) -> str:
 
 
 def test_valid_proposals_become_inert_candidates():
-    proposals = parse_proposals(_proposal_json())
+    proposals = parse_new(_proposal_json())
     assert len(proposals) == 1
     behaviour = proposals[0]
     assert behaviour.status is BehaviourStatus.CANDIDATE
@@ -103,17 +111,17 @@ def test_valid_proposals_become_inert_candidates():
 
 def test_proposals_survive_markdown_fencing_and_prose():
     fenced = f"Here you go:\n```json\n{_proposal_json()}\n```\nHope that helps!"
-    assert len(parse_proposals(fenced)) == 1
+    assert len(parse_new(fenced)) == 1
     prose = f"I found this pattern: {_proposal_json()} end of report."
-    assert len(parse_proposals(prose)) == 1
+    assert len(parse_new(prose)) == 1
 
 
 def test_wrapped_object_and_empty_replies():
     wrapped = json.dumps({"behaviours": json.loads(_proposal_json())})
-    assert len(parse_proposals(wrapped)) == 1
-    assert parse_proposals("Sorry, no patterns found.") == []
-    assert parse_proposals("") == []
-    assert parse_proposals("[oops") == []
+    assert len(parse_new(wrapped)) == 1
+    assert parse_new("Sorry, no patterns found.") == []
+    assert parse_new("") == []
+    assert parse_new("[oops") == []
 
 
 def test_malformed_proposals_are_dropped_individually():
@@ -131,7 +139,7 @@ def test_malformed_proposals_are_dropped_individually():
             json.loads(_proposal_json())[0],
         ]
     )
-    proposals = parse_proposals(reply)
+    proposals = parse_new(reply)
     assert [b.name for b in proposals] == ["Evening handoff"]
 
 
@@ -150,7 +158,7 @@ def test_actions_from_llm_are_ignored_and_bad_fields_defaulted():
             }
         ]
     )
-    behaviour = parse_proposals(reply)[0]
+    behaviour = parse_new(reply)[0]
     assert behaviour.actions == []
     assert behaviour.steps[1].max_gap_seconds == 300  # invalid gap -> default
     assert behaviour.weekdays == {1}
@@ -173,13 +181,13 @@ def test_duplicates_of_existing_behaviours_are_skipped():
             }
         ]
     )
-    assert parse_proposals(same, [existing]) == []
+    assert parse_new(same, [existing]) == []
 
 
 def test_ids_are_deterministic_and_reruns_are_idempotent():
-    first = parse_proposals(_proposal_json())
-    again = parse_proposals(_proposal_json(), first)
-    second_run = parse_proposals(_proposal_json())
+    first = parse_new(_proposal_json())
+    again = parse_new(_proposal_json(), first)
+    second_run = parse_new(_proposal_json())
     assert again == []
     assert first[0].id == second_run[0].id
 
@@ -197,14 +205,12 @@ def test_proposal_cap_is_enforced():
             for i in range(MAX_PROPOSALS_PER_RUN + 3)
         ]
     )
-    assert len(parse_proposals(reply)) == MAX_PROPOSALS_PER_RUN
+    assert len(parse_new(reply)) == MAX_PROPOSALS_PER_RUN
 
 
 def test_signature_is_stable_and_action_free():
-    proposals = parse_proposals(_proposal_json())
-    assert behaviour_signature(proposals[0]) == behaviour_signature(
-        parse_proposals(_proposal_json())[0]
-    )
+    proposals = parse_new(_proposal_json())
+    assert behaviour_signature(proposals[0]) == behaviour_signature(parse_new(_proposal_json())[0])
 
 
 # -- refinement protocol -------------------------------------------------------

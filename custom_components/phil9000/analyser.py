@@ -329,38 +329,3 @@ def _extract_json(text: str):
             except (ValueError, TypeError):
                 continue
     return None
-
-
-def parse_proposals(text: str, existing: list[Behaviour] | None = None) -> list[Behaviour]:
-    """Turn an LLM reply into validated candidate behaviours.
-
-    Invalid replies yield []; individual malformed proposals are dropped.
-    Proposals duplicating an existing behaviour (same steps + schedule) are
-    skipped, as are duplicates within the reply. Deterministic ids
-    (llm-<hash>) make repeated analyser runs idempotent.
-    """
-    payload = _extract_json(text)
-    if isinstance(payload, dict):
-        payload = payload.get("behaviours")
-    if not isinstance(payload, list):
-        return []
-
-    seen = {behaviour_signature(b) for b in existing or []}
-    seen.update(
-        b.id.removeprefix(PROPOSAL_PREFIX)
-        for b in existing or []
-        if b.id.startswith(PROPOSAL_PREFIX)
-    )
-    proposals: list[Behaviour] = []
-    for item in payload:
-        behaviour = _to_behaviour(item)
-        if behaviour is None:
-            continue
-        signature = behaviour.id.removeprefix(PROPOSAL_PREFIX)
-        if signature in seen:
-            continue
-        seen.add(signature)
-        proposals.append(behaviour)
-        if len(proposals) >= MAX_PROPOSALS_PER_RUN:
-            break
-    return proposals

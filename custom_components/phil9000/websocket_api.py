@@ -62,14 +62,21 @@ def async_setup(hass: HomeAssistant) -> None:
         websocket_api,
     )
 
+    def _require(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> Phil9000Runtime | None:
+        """The runtime for this message, or None after sending not-loaded."""
+        runtime = current_runtime(hass)
+        if runtime is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        return runtime
+
     @websocket_api.websocket_command({"type": "phil9000/behaviours"})
     @websocket_api.async_response
     async def handle_behaviours(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         connection.send_result(
             msg["id"],
@@ -97,9 +104,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_set_status(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         try:
             await runtime.async_set_status(
@@ -130,9 +135,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_set_actions(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         actions = [
             BehaviourAction(
@@ -159,8 +162,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_activity(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        if current_runtime(hass) is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if _require(hass, connection, msg) is None:
             return
         try:
             items = await analysis.async_fetch_activity(
@@ -179,9 +181,7 @@ def async_setup(hass: HomeAssistant) -> None:
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
         """Live activity feed: one message per observed state change."""
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         connection.send_result(msg["id"])
 
@@ -201,9 +201,7 @@ def async_setup(hass: HomeAssistant) -> None:
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
         """Recent LLM analysis runs, newest first (the panel's Analysis log)."""
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         connection.send_result(msg["id"], {"entries": list(reversed(runtime.analysis_log))})
 
@@ -213,9 +211,7 @@ def async_setup(hass: HomeAssistant) -> None:
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
         """Live analysis log: one message per run event (start, progress, result)."""
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         connection.send_result(msg["id"])
 
@@ -234,11 +230,9 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_run_analysis(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        runtime = current_runtime(hass)
-        entry = _entry(hass)
-        if runtime is None or entry is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
+        entry = _entry(hass)
         try:
             summary = await analysis.async_run_analysis(hass, entry, runtime, trigger="manual")
         except analysis.AnalysisUnavailableError as err:
@@ -258,9 +252,7 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_set_name(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         try:
             await runtime.async_rename(hass, msg[ATTR_BEHAVIOUR_ID], msg["name"].strip())
@@ -275,9 +267,7 @@ def async_setup(hass: HomeAssistant) -> None:
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
         """What the entry observes: domain specs, extra entities, mutes."""
-        runtime = current_runtime(hass)
-        if runtime is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
         subscriptions = runtime.subscriptions
         domain_options = []
@@ -323,11 +313,9 @@ def async_setup(hass: HomeAssistant) -> None:
     async def _async_set_mute(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any], *, mute: bool
     ) -> None:
-        runtime = current_runtime(hass)
-        entry = _entry(hass)
-        if runtime is None or entry is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if _require(hass, connection, msg) is None:
             return
+        entry = _entry(hass)
         entity_id = msg["entity_id"].strip().lower()
         if not is_valid_entity_id(entity_id):
             connection.send_error(
@@ -367,11 +355,9 @@ def async_setup(hass: HomeAssistant) -> None:
                          mute it (domain coverage alone would keep it live).
         Anything not observed stays untouched (no phantom mutes).
         """
-        runtime = current_runtime(hass)
-        entry = _entry(hass)
-        if runtime is None or entry is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if (runtime := _require(hass, connection, msg)) is None:
             return
+        entry = _entry(hass)
         entity_id = msg["entity_id"].strip().lower()
         if not is_valid_entity_id(entity_id):
             connection.send_error(
@@ -412,11 +398,9 @@ def async_setup(hass: HomeAssistant) -> None:
         Explicit entity ids added from the panel survive untouched, as do the
         exclusions; only the bare-domain specs are replaced. Applies in place.
         """
-        runtime = current_runtime(hass)
-        entry = _entry(hass)
-        if runtime is None or entry is None:
-            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "PHIL9000 is not loaded")
+        if _require(hass, connection, msg) is None:
             return
+        entry = _entry(hass)
         wanted = {domain.strip().lower() for domain in msg["domains"]}
         unknown = sorted(wanted - OBSERVABLE_DOMAINS)
         if unknown:

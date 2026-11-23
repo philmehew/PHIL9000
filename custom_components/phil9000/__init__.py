@@ -315,7 +315,10 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
             entry.data.get(CONF_ENTITIES, []), entry.data.get(CONF_EXCLUDE_ENTITIES, ())
         )
         return
-    await hass.config_entries.async_reload(entry.entry_id)
+    # Fire-and-forget per HA's update-listener pattern: awaiting a reload
+    # from inside the listener can re-enter setup while the entry is being
+    # updated. The task is tracked, so tests block on it via block_till_done.
+    hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
 
 
 # -- detection → events & actions ---------------------------------------
