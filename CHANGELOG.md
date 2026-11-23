@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.5.1 — 2026-11-23
+
+### Panel polish + custom LLM prompt
+
+- The **Recent activity** card is always rendered — while loading and when
+  no events have been observed yet — with the hint ("No state changes
+  observed yet…", or a recorder error) shown *inside* the card, instead of
+  the area collapsing to a bare line of text.
+
+- **Custom LLM prompt** (integration settings, just under the conversation
+  agent): a multi-line field pre-filled with the built-in template. Tweak
+  the wording, add household context, or change the output style — it must
+  contain `{summary}` (where the entity history goes) and may use `{known}`
+  and `{cap}`; stray braces and missing placeholders are rejected with a
+  form error; clearing the field restores the built-in template. Safety is
+  unchanged: the reply parser enforces the candidate-only protocol
+  regardless of what the prompt says.
+
 ## v0.5.0 — 2026-11-23
 
 ### Review backlog: engine efficiency, debounced saves, shadow-DOM panel

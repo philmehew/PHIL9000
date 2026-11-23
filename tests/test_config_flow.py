@@ -16,6 +16,7 @@ from custom_components.phil9000.const import (
     OPTION_ANALYSIS_DAYS,
     OPTION_ANALYSIS_ENABLED,
     OPTION_COOLDOWN_DEFAULT,
+    OPTION_CUSTOM_PROMPT,
 )
 from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
@@ -153,3 +154,47 @@ async def test_corrupt_behaviours_yaml_delays_setup(hass: HomeAssistant) -> None
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_options_flow_saves_a_valid_custom_prompt(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+
+    # The form prefills with the built-in template, so a first save without
+    # touching the field stores exactly that (behaviour unchanged).
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {OPTION_CUSTOM_PROMPT: "Look at this: {summary} — say JSON."},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[OPTION_CUSTOM_PROMPT] == "Look at this: {summary} — say JSON."
+
+
+async def test_options_flow_rejects_bad_custom_prompts(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+
+    for bad in (
+        "Never show the history.",  # no {summary}
+        "Broken {summary} with a lone } brace",  # stray brace
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {OPTION_CUSTOM_PROMPT: bad}
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"]
+        assert result["errors"]["base"] in ("prompt_needs_summary", "prompt_invalid")
+        assert not entry.options.get(OPTION_CUSTOM_PROMPT)
+
+    # A blank prompt clears back to the built-in (None), not an error.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {OPTION_CUSTOM_PROMPT: ""}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[OPTION_CUSTOM_PROMPT] is None

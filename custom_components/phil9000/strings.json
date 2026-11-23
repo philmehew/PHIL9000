@@ -20,18 +20,20 @@
     "step": {
       "init": {
         "title": "PHIL9000 settings",
-        "description": "Settings for what PHIL9000 observes, plus pattern analysis and suggestions.",
+        "description": "Analysis and notify settings. What PHIL9000 observes is managed in its panel.",
         "data": {
-          "entities": "Entity types to observe",
-          "entity_ids": "Also observe these individual entities",
-          "exclude_entities": "Never observe these entities (even within observed types)",
           "agent_id": "Conversation agent for pattern analysis (blank = default agent)",
           "notify_entity": "Notify entity for suggestions (blank = none)",
           "cooldown_default": "Default cooldown between detections (seconds)",
           "analysis_enabled": "Run nightly pattern analysis (optional, off by default)",
-          "analysis_days": "Days of history to analyse"
+          "analysis_days": "Days of history to analyse",
+          "custom_prompt": "Custom LLM prompt (blank = built-in; must contain {summary})"
         }
       }
+    },
+    "error": {
+      "prompt_needs_summary": "The custom prompt must contain {summary} — that is where the entity history goes.",
+      "prompt_invalid": "The custom prompt has stray or mismatched {braces} — check the placeholders ({summary}, {known}, {cap})."
     }
   }
 }

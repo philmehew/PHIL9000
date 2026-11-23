@@ -26,9 +26,11 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
 )
 
-from .analyser import DEFAULT_LOOKBACK_DAYS
+from .analyser import DEFAULT_LOOKBACK_DAYS, PROMPT_TEMPLATE
 from .const import (
     CONF_ENTITIES,
     DEFAULT_COOLDOWN_DEFAULT,
@@ -40,6 +42,7 @@ from .const import (
     OPTION_ANALYSIS_DAYS,
     OPTION_ANALYSIS_ENABLED,
     OPTION_COOLDOWN_DEFAULT,
+    OPTION_CUSTOM_PROMPT,
     OPTION_NOTIFY_ENTITY,
 )
 
@@ -100,31 +103,14 @@ class Phil9000ConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class Phil9000OptionsFlow(OptionsFlow):
-    """Observation refinement (domains, extra entities, exclusions) and settings."""
+    """Analysis/notify settings (observation is managed in the panel)."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            # Settings only: what gets observed (domains, per-entity adds and
-            # mutes) is managed live in the PHIL9000 panel.
-            agent_id = (user_input.get(OPTION_AGENT_ID) or "").strip() or None
-            notify_entity = (user_input.get(OPTION_NOTIFY_ENTITY) or "").strip() or None
-            return self.async_create_entry(
-                title="",
-                data={
-                    OPTION_AGENT_ID: agent_id,
-                    OPTION_NOTIFY_ENTITY: notify_entity,
-                    OPTION_COOLDOWN_DEFAULT: int(
-                        user_input.get(OPTION_COOLDOWN_DEFAULT, DEFAULT_COOLDOWN_DEFAULT)
-                    ),
-                    OPTION_ANALYSIS_ENABLED: bool(user_input.get(OPTION_ANALYSIS_ENABLED, False)),
-                    OPTION_ANALYSIS_DAYS: int(
-                        user_input.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS)
-                    ),
-                },
-            )
-
+    def _schema(self, values: dict[str, Any]) -> vol.Schema:
+        # Prefill the prompt field with the built-in template so tweaks start
+        # from the real wording; a blank value restores the built-in.
         current = self.config_entry.options
-        schema = vol.Schema(
+        values = {**current, **{k: v for k, v in values.items() if k == OPTION_CUSTOM_PROMPT}}
+        return vol.Schema(
             {
                 # Selector defaults are validated by voluptuous: only supply
                 # one when a value is actually configured, otherwise the key
@@ -133,6 +119,10 @@ class Phil9000OptionsFlow(OptionsFlow):
                     OPTION_AGENT_ID,
                     default=current.get(OPTION_AGENT_ID) or vol.UNDEFINED,
                 ): EntitySelector(EntitySelectorConfig(domain="conversation")),
+                vol.Optional(
+                    OPTION_CUSTOM_PROMPT,
+                    default=values.get(OPTION_CUSTOM_PROMPT) or PROMPT_TEMPLATE,
+                ): TextSelector(TextSelectorConfig(multiline=True)),
                 vol.Optional(
                     OPTION_NOTIFY_ENTITY,
                     default=current.get(OPTION_NOTIFY_ENTITY) or vol.UNDEFINED,
@@ -155,4 +145,52 @@ class Phil9000OptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            # Settings only: what gets observed (domains, per-entity adds and
+            # mutes) is managed live in the PHIL9000 panel.
+            agent_id = (user_input.get(OPTION_AGENT_ID) or "").strip() or None
+            notify_entity = (user_input.get(OPTION_NOTIFY_ENTITY) or "").strip() or None
+            template = (user_input.get(OPTION_CUSTOM_PROMPT) or "").strip() or None
+            if template is not None:
+                error = _validate_prompt_template(template)
+                if error:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=self._schema(user_input),
+                        errors={"base": error},
+                    )
+            return self.async_create_entry(
+                title="",
+                data={
+                    OPTION_AGENT_ID: agent_id,
+                    OPTION_NOTIFY_ENTITY: notify_entity,
+                    OPTION_COOLDOWN_DEFAULT: int(
+                        user_input.get(OPTION_COOLDOWN_DEFAULT, DEFAULT_COOLDOWN_DEFAULT)
+                    ),
+                    OPTION_ANALYSIS_ENABLED: bool(user_input.get(OPTION_ANALYSIS_ENABLED, False)),
+                    OPTION_ANALYSIS_DAYS: int(
+                        user_input.get(OPTION_ANALYSIS_DAYS, DEFAULT_LOOKBACK_DAYS)
+                    ),
+                    OPTION_CUSTOM_PROMPT: template,
+                },
+            )
+
+        return self.async_show_form(step_id="init", data_schema=self._schema({}))
+
+
+def _validate_prompt_template(template: str) -> str | None:
+    """None when the template is usable, else a strings.json error key.
+
+    The parser's guardrails are prompt-independent, so a custom template
+    cannot break safety — but a prompt without ``{summary}`` would hide the
+    history from the LLM entirely, and stray braces would crash the format.
+    """
+    if "{summary}" not in template:
+        return "prompt_needs_summary"
+    try:
+        template.format(summary="", known="", cap=0)
+    except (KeyError, IndexError, ValueError):
+        return "prompt_invalid"
+    return None

@@ -29,6 +29,7 @@ from .const import (
     CONF_EXCLUDE_ENTITIES,
     OPTION_AGENT_ID,
     OPTION_ANALYSIS_DAYS,
+    OPTION_CUSTOM_PROMPT,
 )
 from .notifier import async_notify
 from .subscriptions import Subscriptions, registry_is_noise
@@ -304,7 +305,11 @@ async def _async_analysis_pass(
         f"Collected {total_events} state changes from {live_entities} entities, "
         f"{days}-day window, {len(existing)} known {known}",
     )
-    prompt = build_prompt(summarise_history(events_by_entity), existing)
+    prompt = build_prompt(
+        summarise_history(events_by_entity),
+        existing,
+        (entry.options.get(OPTION_CUSTOM_PROMPT) or "").strip() or None,
+    )
     try:
         reply = await call(hass, entry.options.get(OPTION_AGENT_ID), prompt)
     except Exception as err:  # noqa: BLE001 — surface as a friendly service error

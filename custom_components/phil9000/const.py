@@ -91,6 +91,9 @@ OPTION_NOTIFY_ENTITY = "notify_entity"
 OPTION_COOLDOWN_DEFAULT = "cooldown_default"
 OPTION_ANALYSIS_ENABLED = "analysis_enabled"
 OPTION_ANALYSIS_DAYS = "analysis_days"
+# Full override of the LLM prompt template ({summary}, {known}, {cap}).
+# Blank = the built-in template in analyser.py.
+OPTION_CUSTOM_PROMPT = "custom_prompt"
 
 DEFAULT_COOLDOWN_DEFAULT = 3600
 

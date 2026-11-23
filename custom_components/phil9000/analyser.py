@@ -122,9 +122,15 @@ def _render_existing(existing: list[Behaviour]) -> str:
     return json.dumps(rendered, indent=1)
 
 
-def build_prompt(summary: str, existing: list[Behaviour]) -> str:
-    """Prompt for the conversation agent: refine candidates, propose new ones."""
-    return PROMPT_TEMPLATE.format(
+def build_prompt(summary: str, existing: list[Behaviour], template: str | None = None) -> str:
+    """Prompt for the conversation agent: refine candidates, propose new ones.
+
+    ``template`` (from the integration options) replaces the built-in
+    wording; it must contain ``{summary}`` and may use ``{known}`` and
+    ``{cap}``. Safety does not depend on it: the reply parser enforces the
+    candidate-only protocol no matter what the prompt asked for.
+    """
+    return (template or PROMPT_TEMPLATE).format(
         summary=summary, known=_render_existing(existing), cap=MAX_PROPOSALS_PER_RUN
     )
 

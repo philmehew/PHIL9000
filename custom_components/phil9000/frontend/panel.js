@@ -110,6 +110,7 @@ const STYLE = `
     .act-list li { display: flex; gap: 10px; padding: 3px 0; align-items: baseline;
                    border-bottom: 1px solid var(--divider-color); }
     .act-list li:last-child { border-bottom: none; }
+    .act-list .empty { border-bottom: none; }
     .act-time { font-family: monospace; font-size: 12px; color: var(--secondary-text-color);
                 flex: 0 0 86px; }
     .act-entity { font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
@@ -197,7 +198,9 @@ class Phil9000Panel extends HTMLElement {
         <div id="activity-col">
           <div class="section-head"><h2 class="section">Recent activity</h2>
             <button class="secondary" data-act="pause">Pause</button></div>
-          <div id="activity"><p class="empty">Loading…</p></div>
+          <div id="activity"><div class="card"><ul class="act-list">
+            <li class="empty">Loading…</li>
+          </ul></div></div>
           <h2 class="section">Analysis log</h2>
           <div class="card"><ul class="log-list" id="analysis-log">
             <li class="empty">Loading…</li>
@@ -323,11 +326,13 @@ class Phil9000Panel extends HTMLElement {
     const el = this.shadow.querySelector("#activity");
     if (!el) return;
     if (this._activity.length === 0) {
-      el.innerHTML = `<p class="empty">${esc(
-        this._activityHint ||
-          "No state changes observed yet. Trigger a sensor (or use Developer Tools → " +
-            "Set State) and it should appear here within a second.",
-      )}</p>`;
+      // The card frame is always present — an empty feed should look like
+      // a card with a hint in it, not a collapsed hole in the layout.
+      const message = this._activityHint ||
+        "No state changes observed yet. Trigger a sensor (or use Developer Tools → " +
+          "Set State) and it should appear here within a second.";
+      el.innerHTML = `<div class="card"><ul class="act-list">
+        <li class="empty">${esc(message)}</li></ul></div>`;
       return;
     }
     el.innerHTML = `<div class="card"><ul class="act-list">${this._activity

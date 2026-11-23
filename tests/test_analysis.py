@@ -22,6 +22,7 @@ from custom_components.phil9000.analysis import (
 from custom_components.phil9000.const import (
     DOMAIN,
     OPTION_ANALYSIS_ENABLED,
+    OPTION_CUSTOM_PROMPT,
     OPTION_NOTIFY_ENTITY,
     SERVICE_RUN_ANALYSIS,
 )
@@ -366,3 +367,24 @@ async def test_skip_line_is_persisted_without_a_run(hass: HomeAssistant) -> None
     loaded = await hass.async_add_executor_job(store.load)
     assert loaded, "the skip line must reach the file without a full run"
     assert loaded[-1]["message"].startswith("Skipped")
+
+
+async def test_custom_prompt_reaches_the_agent(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(
+        hass,
+        options={
+            OPTION_NOTIFY_ENTITY: "notify.mobile_phone",
+            OPTION_CUSTOM_PROMPT: "HOUSE HISTORY: {summary}\nKNOWN: {known}\nReply JSON.",
+        },
+    )
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    agent = FakeAgent()
+
+    await async_run_analysis(
+        hass, entry, runtime, history_provider=_fake_history, agent_call=agent, notify=False
+    )
+
+    assert agent.calls[0][1].startswith("HOUSE HISTORY:")
+    assert "KNOWN:" in agent.calls[0][1]
+    assert "binary_sensor.office_presence" in agent.calls[0][1]  # {summary} expanded

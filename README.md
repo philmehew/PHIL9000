@@ -94,6 +94,14 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   patterns. Everything is schema-validated; proposals arrive as candidates with **no
   actions**.
 
+- **Custom LLM prompt**: the integration settings include a *Custom LLM prompt* field
+  (just under the conversation agent) pre-filled with the built-in template — tweak
+  the wording, add household context, or change the output style. It must contain
+  `{summary}` (where the entity history goes) and may use `{known}` (current
+  behaviours) and `{cap}`; clear it to restore the built-in. Safety never depends on
+  the prompt: the reply parser enforces the candidate-only protocol no matter what
+  the prompt asked for.
+
 - **Analysis log** under the activity feed: every LLM run reports itself — who
   triggered it (panel button, service, nightly schedule), how much history it
   collected, what it refined or proposed, how long it took, and why it failed when

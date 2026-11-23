@@ -350,3 +350,14 @@ def test_unparseable_and_empty_replies_yield_nothing():
         result = parse_analysis_reply(babble, [_candidate()])
         assert result.refined == []
         assert result.new == []
+
+
+def test_custom_prompt_template_is_used():
+    template = "HISTORY: {summary}\nKNOWN: {known}\ncap={cap}."
+    prompt = build_prompt("office off", [], template)
+    assert prompt == f"HISTORY: office off\nKNOWN: []\ncap={MAX_PROPOSALS_PER_RUN}."
+
+
+def test_blank_template_falls_back_to_builtin():
+    assert build_prompt("s", [], None) == build_prompt("s", [])
+    assert build_prompt("s", [], "") == build_prompt("s", [])
