@@ -203,8 +203,7 @@ class Phil9000Panel extends HTMLElement {
     this._readOnly = hass.user && hass.user.is_admin === false;
 
     this.shadow.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
-      <button data-act="analyse" ${this._analysing || this._readOnly ? "disabled" : ""}>Analyse now</button>
-      <button class="secondary" data-act="refresh">Refresh</button></header>
+      <button data-act="analyse" ${this._analysing || this._readOnly ? "disabled" : ""}>Analyse now</button></header>
       <p class="meta"></p><div id="banner"></div>
       <div class="top-grid">
         <div id="activity-col">
@@ -655,11 +654,6 @@ class Phil9000Panel extends HTMLElement {
     if (!btn || this._busy) return;
     const act = btn.dataset.act;
     const id = btn.dataset.id;
-    if (act === "refresh") {
-      this._refresh();
-      this._loadMonitoring();
-      return this._reloadActivity();
-    }
     if (act === "analyse") return this._analyse();
     if (act === "pause") return this._togglePause();
     if (act === "mute") return this._setObserved(btn.dataset.entity, false);

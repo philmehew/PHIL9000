@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.7 — 2026-11-23
+
+### Removed the Refresh button
+
+- The panel is push-based: behaviours, monitoring and the activity feed
+  all update live, and observation changes now re-fetch immediately — the
+  button's only remaining role was re-syncing after out-of-band service
+  calls, for which a page reload is the honest equivalent.
+- Frontend-only change: after updating, a browser refresh suffices
+  (no HA restart).
+
 ## v0.5.6 — 2026-11-23
 
 ### Fix: activity feed now follows observation changes
