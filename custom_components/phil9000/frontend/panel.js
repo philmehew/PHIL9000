@@ -133,7 +133,7 @@ const STYLE = `
     .section-head { display: flex; align-items: baseline; gap: 12px; }
     .section-head .section { margin-bottom: 0; }
     .section-head button { font-size: 12px; padding: 3px 12px; }
-    .section-head input { font-size: 12px; padding: 3px 8px; width: 160px;
+    .section-head input { font-size: 12px; padding: 3px 8px; width: 230px;
       margin-right: -4px; }
     .feed-status { font-size: 12px; color: var(--secondary-text-color);
                    margin-left: auto; text-align: right; }
