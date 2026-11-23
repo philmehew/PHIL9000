@@ -200,7 +200,7 @@ async def test_activity_returns_feed_rows(hass: HomeAssistant, hass_ws_client, m
     assert out["success"] is True
     assert out["result"]["items"] == rows
     assert captured["entity_ids"] == sorted([OFFICE])
-    assert captured["limit"] == 1000  # full-size feed: 3h window, capped at 1000 rows
+    assert captured["limit"] == 1000  # full-size feed: week window, cap 1000 rows
     # Diagnostics the panel renders under the heading.
     assert out["result"]["observed"] == 1
     assert out["result"]["window_hours"] == analysis.ACTIVITY_LOOKBACK_HOURS

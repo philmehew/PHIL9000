@@ -24,7 +24,8 @@ from typing import Any
 # Rows kept in the feed: the panel box shows ~25 rows visibly and scrolls,
 # but keeps a full recent history so re-opening the panel or scrolling back
 # still has context. ~1000 rows ≈ 150 KB of JSON over the websocket — cheap
-# on anything that runs Home Assistant.
+# on anything that runs Home Assistant. With the noise rules in place the
+# cap (not the lookback window) is the usual bound.
 DEFAULT_LIMIT = 1000
 
 # Transitions *involving* these states are not household activity: every HA

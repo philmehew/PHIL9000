@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.13 — 2026-11-23
+
+### Feed is now "last 1000": 7-day lookback window
+
+- With the noise filters in place, few homes produce 1000 genuine changes
+  in 3 hours, so the window was starving the feed. The lookback is now
+  **7 days** and the 1000-row cap does the bounding.
+- Still one indexed recorder read per panel open (same-state rows are
+  excluded in SQL), and the payload stays capped at 1000 rows.
+- The status line shows the window in days (`last 7d`) when ≥ 24 hours.
+
 ## v0.5.12 — 2026-11-23
 
 ### Filter "off → off" rows (same state on both ends)

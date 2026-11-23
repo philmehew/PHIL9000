@@ -105,7 +105,12 @@ async def async_collect_history(
     return events_by_entity
 
 
-ACTIVITY_LOOKBACK_HOURS = 3
+# Seven days back, capped at DEFAULT_LIMIT rows after filtering: with the
+# noise rules in place a busy home rarely reaches 1000 real changes in a
+# shorter window, so the cap — not the window — is the usual bound. The
+# query is one indexed read (significant changes only, per metadata_id)
+# when the panel opens; the row cap still bounds the websocket payload.
+ACTIVITY_LOOKBACK_HOURS = 168
 
 
 async def async_fetch_activity(
@@ -116,8 +121,10 @@ async def async_fetch_activity(
     Reads the recorder — HA's single central activity log — in one query,
     marks attribute-only rows as non-changes, derives old_state from the
     previous recorded state, and merges through dedupe_activity (newest
-    first, capped). The short window (hours, not days) keeps the query
-    trivial; the row cap bounds the payload.
+    first, capped). The window is a week but the cap usually binds first
+    (with availability/no-change rows filtered, even busy homes rarely
+    produce 1000 real changes faster than that); the query stays a single
+    indexed read, and the cap bounds the websocket payload.
     """
     from homeassistant.components.recorder import (  # function-local: purity guard
         history,

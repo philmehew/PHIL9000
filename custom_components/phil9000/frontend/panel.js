@@ -16,8 +16,8 @@
 const STATUS_RANK = { confirmed: 0, candidate: 1, dismissed: 2 };
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 // Rows kept client-side: matches the backend feed cap. The visible box
-// shows ~25 rows and scrolls; the buffer keeps the last 3 hours of
-// context available without re-fetching.
+// shows ~25 rows and scrolls; the buffer keeps the full window (a week,
+// capped) available without re-fetching.
 const FEED_MAX = 1000;
 
 const esc = (value) =>
@@ -365,9 +365,11 @@ class Phil9000Panel extends HTMLElement {
       return;
     }
     el.classList.remove("error");
+    const win =
+      info.hours >= 24 ? `${Math.round(info.hours / 24)}d` : `${info.hours}h`;
     let text =
       `history: ${info.count} of ${info.observed} observed entities, ` +
-      `last ${info.hours}h (cap ${info.limit})`;
+      `last ${win} (cap ${info.limit})`;
     if (info.entities && info.entities.length) text += ` · ${info.entities.join(", ")}`;
     el.textContent = text;
   }
