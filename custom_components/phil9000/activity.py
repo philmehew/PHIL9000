@@ -40,14 +40,18 @@ RECOVERY_STATES = frozenset({"unavailable", "unknown"})
 def is_feed_noise(row: dict[str, Any]) -> bool:
     """True for rows the feed must not show.
 
-    Either end unavailable/unknown (device bookkeeping), or no previous
-    state at all ("— -> idle"): the first entry for an entity in the
-    window proves nothing changed, only that we started watching it.
+    Either end unavailable/unknown (device bookkeeping), no previous state
+    at all ("— -> idle": the first entry for an entity proves nothing
+    changed, only that we started watching it), or the same state on both
+    ends ("off -> off"): HA writes restored states at startup as fresh
+    rows even when nothing changed, and the significant-changes query
+    keeps those.
     """
     return (
         row.get("old_state") in RECOVERY_STATES
         or row.get("new_state") in RECOVERY_STATES
         or row.get("old_state") is None
+        or row.get("old_state") == row.get("new_state")
     )
 
 

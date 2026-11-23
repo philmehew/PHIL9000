@@ -94,6 +94,21 @@ def test_rows_without_previous_state_are_dropped():
     assert [r["entity_id"] for r in dedupe_activity(rows)] == [OFFICE]
 
 
+def test_same_state_rows_are_dropped():
+    # "off -> off": HA writes restored states at startup as fresh rows even
+    # when nothing changed; the significant-changes query keeps them, so the
+    # backfill derives old from the previous row and shows a fake change.
+    rows = [
+        row(OFFICE, "2026-11-22T17:30:00+00:00", "off", "on"),
+        row(OFFICE, "2026-11-22T17:35:00+00:00", "off", "off"),  # startup restore
+        row(KITCHEN, "2026-11-22T17:36:00+00:00", "on", "on"),  # same, first row
+    ]
+    feed = dedupe_activity(rows)
+    assert [(r["entity_id"], r["old_state"], r["new_state"]) for r in feed] == [
+        (OFFICE, "on", "off")
+    ]
+
+
 def test_default_limit_is_1000():
     rows = [
         row(

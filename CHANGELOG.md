@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.12 — 2026-11-23
+
+### Filter "off → off" rows (same state on both ends)
+
+- At startup HA writes each restored entity state as a fresh recorder row
+  even when nothing changed, and the significant-changes query keeps those
+  rows — so the backfill derived the previous state from the row before and
+  showed fake `off → off` changes (always-on sensors like Amazon presence
+  detectors were the worst offenders).
+- `activity.is_feed_noise` now also drops rows whose old and new state are
+  equal, covering both the recorder backfill and live pushes (live already
+  skipped these; the rule is now uniform).
+
 ## v0.5.11 — 2026-11-23
 
 ### Filter "— → state" rows (no previous state)
