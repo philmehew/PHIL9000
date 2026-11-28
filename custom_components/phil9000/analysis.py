@@ -430,6 +430,13 @@ async def _async_analysis_pass(
         )
 
     result = parse_analysis_reply(reply, existing)
+    # Guardrail drops are visible: a run that silently eats everything the
+    # model proposed is indistinguishable from a model that proposed nothing.
+    for name, reason in result.dropped:
+        _log_run(runtime, "info", f"Dropped candidate '{name}': {reason}")
+    if not result.refined and not result.new:
+        head = " ".join(reply.split())[:150]
+        _log_run(runtime, "info", f"Empty result — reply head: “{head}”")
     if result.refined or result.new:
         for behaviour in result.new:
             runtime.engine.add_behaviour(behaviour)

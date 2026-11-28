@@ -160,6 +160,12 @@ Ignore, because they are automations or noise rather than behaviour:
   thermostat reporting "auto" every 30 minutes, a floodlight on motion).
 - One-offs: a pattern must have recurred on multiple days before you propose it.
 
+The current behaviours list is what the household ALREADY knows — do not treat
+it as a hint of what to find, and do not anchor on it. Dismissed patterns are
+dead ends the user rejected: never restate one, not even with small variations
+(shifted times, extra or dropped steps). Look for what is NOT in that list:
+other rooms, other times of day, routines nobody has named yet.
+
 Be creative but honest: prefer a plausible, well-argued proposal over silence —
 the user confirms or dismisses each candidate, so an interesting guess is valuable
 and an empty reply is not. Describe what the person is doing (e.g. "ends the work
@@ -170,7 +176,7 @@ Rules:
 - You may only update ids whose status is "candidate". NEVER put a confirmed
   or dismissed id in "updates" — those are hard-fixed by the user. If a
   confirmed pattern has a genuinely different variant, propose it in "new".
-- Never re-propose or restate dismissed patterns.
+- Never re-propose or restate dismissed patterns, in whole or in variation.
 - A pattern needs 2 or more steps in a stable order; only use entities in the history.
 - At most {cap} updates and {cap} new patterns; return empty lists only when the
   history genuinely shows no recurring multi-day routine.
@@ -282,10 +288,16 @@ class AnalysisResult:
 
     ``refined`` holds the *existing* Behaviour objects that were updated (the
     engine already owns them); ``new`` holds fresh candidates to add.
+    ``dropped`` holds ``(name, reason)`` for proposals the guardrails rejected
+    — the analysis log shows them, because a run that silently eats everything
+    the model proposed is indistinguishable from a model that proposed
+    nothing (which is exactly how weeks of "no new convincing patterns"
+    hid a working LLM).
     """
 
     refined: list[Behaviour] = field(default_factory=list)
     new: list[Behaviour] = field(default_factory=list)
+    dropped: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _apply_update(target: Behaviour, revised: Behaviour) -> None:
@@ -348,18 +360,39 @@ def parse_analysis_reply(text: str, existing: list[Behaviour] | None = None) -> 
             break
 
     proposals: list[Behaviour] = []
+    dropped: list[tuple[str, str]] = []
+    dismissed_steps = {
+        tuple((s.entity_id, s.to_state) for s in b.steps): b.name
+        for b in existing
+        if b.status is BehaviourStatus.DISMISSED
+    }
     for item in payload.get("new") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip() or "<unnamed>"
+        steps_raw = item.get("steps")
+        if not isinstance(steps_raw, list) or len(steps_raw) < 2:
+            dropped.append((name, "needs 2 or more steps in a stable order"))
+            continue
         behaviour = _to_behaviour(item)
         if behaviour is None:
+            dropped.append((name, "did not validate (bad entity ids, states or fields)"))
+            continue
+        step_key = tuple((s.entity_id, s.to_state) for s in behaviour.steps)
+        if step_key in dismissed_steps:
+            # The signature check only catches exact copies; the model happily
+            # "restates" a dismissed pattern with shifted times or weekdays.
+            dropped.append((name, f"restates the dismissed '{dismissed_steps[step_key]}'"))
             continue
         signature = behaviour.id.removeprefix(PROPOSAL_PREFIX)
         if signature in seen:
+            dropped.append((name, "duplicates another behaviour in this household"))
             continue
         seen.add(signature)
         proposals.append(behaviour)
         if len(proposals) >= MAX_PROPOSALS_PER_RUN:
             break
-    return AnalysisResult(refined=refined, new=proposals)
+    return AnalysisResult(refined=refined, new=proposals, dropped=dropped)
 
 
 # -- proposal validation ---------------------------------------------------------

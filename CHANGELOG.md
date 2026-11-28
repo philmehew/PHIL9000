@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.7.3 — 2026-11-28
+
+### No more silent guardrail drops — and the model stops restating dismissed patterns
+
+- Reproducing a live run showed the last "no new convincing patterns" was
+  the parser silently eating what the model proposed: a 1-step pattern
+  (needs 2+ steps) vanished without trace, and two *restatements of
+  dismissed behaviours* sneaked past the exact-signature check (same
+  steps, trivially different weekdays). Every rejected proposal now
+  carries a visible reason in the analysis log ("Dropped candidate 'X':
+  needs 2 or more steps…", "…restates the dismissed 'Y'"), and an empty
+  result logs the reply head — a run that eats everything is now
+  distinguishable from a model that proposed nothing.
+- A proposal whose step sequence matches a dismissed behaviour is dropped
+  as a restatement, regardless of shifted times or weekdays.
+- The prompt now explicitly tells the model that the known-behaviours
+  list is *not* a hint of what to find: dismissed patterns are dead
+  ends, and it must look for what is not in the list. Verified against a
+  live local LLM: with the dismissed list present, the old wording
+  produced restatements and nothing new; the new wording produces the
+  household's real routines (work session start ~08:45, evening cinema,
+  late-night wind-down).
+
 ## v0.7.2 — 2026-11-28
 
 ### Fix: ai_task runs crashed on Home Assistant's merged LLM serializer

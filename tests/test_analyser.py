@@ -262,6 +262,80 @@ def test_ids_are_deterministic_and_reruns_are_idempotent():
     assert first[0].id == second_run[0].id
 
 
+# -- guardrail drops are reported --------------------------------------------------
+
+
+def test_dismissed_restatement_is_dropped_with_reason():
+    # Real-world: the model "restates" a dismissed pattern with shifted
+    # weekdays/times, which sneaks past the exact-signature check. The step
+    # sequence alone says it is the same rejected pattern.
+    from custom_components.phil9000.seed import end_of_work_day as seed
+
+    dismissed = seed(status=BehaviourStatus.DISMISSED)
+    dismissed.name = "Morning wake-up routine"
+    restatement = json.dumps(
+        {
+            "updates": [],
+            "new": [
+                {
+                    "name": "Morning wake-up sequence",
+                    "description": "same old thing",
+                    "steps": [
+                        {"entity_id": OFFICE, "to_state": "off"},
+                        {"entity_id": KITCHEN, "to_state": "on"},
+                    ],
+                    "weekdays": [2, 3, 4],  # trivially different
+                    "time_start": "16:00",
+                    "time_end": "19:00",
+                }
+            ],
+        }
+    )
+    result = parse_analysis_reply(restatement, [dismissed])
+    assert result.new == []
+    assert result.dropped == [
+        ("Morning wake-up sequence", "restates the dismissed 'Morning wake-up routine'")
+    ]
+
+
+def test_guardrail_drop_reasons_are_reported():
+    reply = json.dumps(
+        {
+            "updates": [],
+            "new": [
+                {
+                    "name": "Solo",
+                    "description": "one step is not a pattern",
+                    "steps": [{"entity_id": "light.stairs", "to_state": "on"}],
+                },
+                {
+                    "name": "Bogus",
+                    "description": "no steps at all",
+                    "steps": [],
+                },
+                {
+                    "name": "Broken",
+                    "description": "bad field types",
+                    "steps": [{"entity_id": "not a step", "to_state": 42}, {"to_state": "on"}],
+                },
+                {
+                    "name": "Fine",
+                    "description": "a real proposal",
+                    "steps": [
+                        {"entity_id": OFFICE, "to_state": "off"},
+                        {"entity_id": KITCHEN, "to_state": "on"},
+                    ],
+                },
+            ],
+        }
+    )
+    result = parse_analysis_reply(reply, [])
+    assert [b.name for b in result.new] == ["Fine"]
+    assert ("Solo", "needs 2 or more steps in a stable order") in result.dropped
+    assert ("Bogus", "needs 2 or more steps in a stable order") in result.dropped
+    assert ("Broken", "did not validate (bad entity ids, states or fields)") in result.dropped
+
+
 def test_proposal_cap_is_enforced():
     reply = json.dumps(
         [
