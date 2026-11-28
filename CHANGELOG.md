@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.6.0 — 2026-11-28
+
+### Smarter, more creative pattern analysis
+
+- The LLM prompt is rewritten after a deep dive into a real week of
+  recorder history. The old prompt reliably found nothing: it described
+  an existing PIR-light automation as a "pattern", invented steps using
+  entities that don't exist, and returned "no new convincing patterns"
+  for every genuinely human rhythm in the data (work-day start ~08:50
+  and end ~18:00 in the garden office, nightly cinema ~22:30, bedtime
+  wind-down ~21:45, weekday wake-up ~07:15).
+- The new prompt asks for household routines rather than device
+  automations: repeating daily rhythms, room-to-room movement, wind-down
+  chains, weekday/weekend differences — and explicitly ignores
+  sensor→light echoes, timer-refreshed states, motion floodlights and
+  constant entities. Steps may be hours apart (`max_gap_seconds`
+  default was silently forcing everything to 5-minute links), and the
+  LLM is nudged to make plausible, argued proposals instead of silence,
+  since you confirm or dismiss each candidate.
+- **If you set a custom prompt in the integration options, clear it** —
+  a stored copy of the old template overrides the built-in one.
+
+### Live analysis status in the panel
+
+- Clicking "Analyse now" now shows a grey "Analysis running…" banner
+  (with spinner) for the whole run — also for runs started elsewhere
+  (the service, the nightly job, another tab), not just your own click.
+- Clicking while a run is in flight is now unmistakable: an amber
+  "Skipped — another analysis run is already in progress" instead of a
+  blue note that read exactly like a result.
+- Every analysis-log entry carries the run state; the log fetch returns
+  the live `running` flag so a freshly opened panel shows it too.
+
+### Activities panel tidy-up
+
+- Removed the "history: 1000 of x observed entities…" status line from
+  the Recent activity header — the entity count is already visible in
+  the Entities panel.
+
 ## v0.5.17 — 2026-11-23
 
 ### Settings form: prompt label split into label + helper text
