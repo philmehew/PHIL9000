@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -822,3 +822,90 @@ async def test_record_save_direct_maps_on_off_actions(hass: HomeAssistant, hass_
     _fire_state_changed(hass, KITCHEN, "off", "on", datetime(2026, 11, 26, 18, 1, tzinfo=UTC))
     await hass.async_block_till_done()
     assert len(calls) == 1
+
+
+# -- the event ring in the activity feed ---------------------------------------
+
+
+async def test_activity_merges_the_event_ring(
+    hass: HomeAssistant, hass_ws_client, monkeypatch
+) -> None:
+    """Presses join the feed even though the recorder never holds them."""
+    await setup_entry(hass, data={CONF_ENTITIES: ["event.bedside_button"]})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+    runtime.event_rows.extend(
+        [
+            {
+                "entity_id": "event.bedside_button",
+                "at": "2026-11-22T21:00:00+00:00",
+                "old_state": None,
+                "new_state": "toggle",
+                "event": True,
+            },
+            {
+                "entity_id": "event.bedside_button",
+                "at": "2026-11-22T21:00:30+00:00",
+                "old_state": None,
+                "new_state": "toggle",
+                "event": True,
+            },
+        ]
+    )
+
+    async def no_recorder(hass_arg, entity_ids, limit):  # noqa: ANN001
+        raise analysis.AnalysisUnavailableError("the recorder is not available")
+
+    monkeypatch.setattr(analysis, "async_fetch_activity", no_recorder)
+    client = await hass_ws_client(hass)
+    out = await _send(client, 1, {"type": "phil9000/activity"})
+    assert out["success"] is True
+    presses = out["result"]["items"]
+    assert [r["new_state"] for r in presses] == ["toggle", "toggle"]  # both presses, newest first
+    assert "PHIL9000's own log" in out["result"]["hint"]
+
+
+async def test_activity_feed_hides_muted_and_stale_presses(
+    hass: HomeAssistant, hass_ws_client, monkeypatch
+) -> None:
+    await setup_entry(hass, data={CONF_ENTITIES: ["event.bedside_button"]})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+    now = datetime.now(UTC)
+    runtime.event_rows.extend(
+        [
+            {
+                "entity_id": "event.bedside_button",
+                "at": now.isoformat(),
+                "old_state": None,
+                "new_state": "toggle",
+                "event": True,
+            },
+            {  # muted after the press was captured
+                "entity_id": "event.other_button",
+                "at": now.isoformat(),
+                "old_state": None,
+                "new_state": "single",
+                "event": True,
+            },
+            {  # older than the feed window
+                "entity_id": "event.bedside_button",
+                "at": (now - timedelta(days=30)).isoformat(),
+                "old_state": None,
+                "new_state": "double",
+                "event": True,
+            },
+        ]
+    )
+    runtime.subscriptions.excluded.add("event.other_button")
+
+    async def no_rows(hass_arg, entity_ids, limit):  # noqa: ANN001
+        return []
+
+    monkeypatch.setattr(analysis, "async_fetch_activity", no_rows)
+    client = await hass_ws_client(hass)
+    out = await _send(client, 1, {"type": "phil9000/activity"})
+    items = out["result"]["items"]
+    assert [(r["entity_id"], r["new_state"]) for r in items] == [("event.bedside_button", "toggle")]

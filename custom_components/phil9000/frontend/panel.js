@@ -40,11 +40,14 @@ const timeWindow = (b) => {
   return `${b.time_start.slice(0, 5)}–${b.time_end.slice(0, 5)}`;
 };
 
+// "*" is the any-change to_state (input_button helpers, change-only sensors).
+const stateLabel = (state) => (state === "*" ? "any change" : esc(state));
+
 const stepSummary = (b) =>
   b.steps
     .map(
       (s, i) =>
-        `${i ? " → " : ""}${esc(s.entity_id)} = ${esc(s.to_state)}` +
+        `${i ? " → " : ""}${esc(s.entity_id)} = ${stateLabel(s.to_state)}` +
         (i && s.max_gap_seconds ? ` (≤${Math.round(s.max_gap_seconds / 60)}m)` : ""),
     )
     .join("");
@@ -69,7 +72,8 @@ const STYLE = `
   <style>
     :host { display: block; padding: 16px; color: var(--primary-text-color);
             font-family: Roboto, sans-serif; }
-    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+    header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px;
+             flex-wrap: wrap; }
     header h1 { font-size: 20px; font-weight: 500; margin: 0; }
     .meta { color: var(--secondary-text-color); font-size: 12px; margin: 0 0 16px; }
     .meta code { font-size: 11px; }
@@ -249,17 +253,17 @@ class Phil9000Panel extends HTMLElement {
     this._readOnly = hass.user && hass.user.is_admin === false;
 
     this.shadow.innerHTML = `${STYLE}<header><h1>PHIL9000</h1>
-      <button data-act="analyse" ${this._analysing || this._readOnly ? "disabled" : ""}>Analyse now</button></header>
+      <button data-act="analyse" ${this._analysing || this._readOnly ? "disabled" : ""}>Analyse now</button>
+      <button data-act="record-arm" data-mode="trigger" ${this._readOnly ? "disabled" : ""}
+        title="Capture the state changes that should trigger the automation">● Record trigger</button>
+      <button data-act="record-arm" data-mode="action" ${this._readOnly ? "disabled" : ""}
+        title="Capture the changes the automation should replay">● Record action</button>
+      <button class="secondary" data-act="record-arm" data-mode="off" ${this._readOnly ? "disabled" : ""}
+        title="Stop capturing">Stop</button></header>
       <p class="meta"></p><div id="banner"></div>
       <div class="top-grid">
         <div id="activity-col">
           <div class="section-head"><h2 class="section">Recent activity</h2>
-            <button data-act="record-arm" data-mode="trigger" ${this._readOnly ? "disabled" : ""}
-              title="Capture the state changes that should trigger the automation">● Record trigger</button>
-            <button data-act="record-arm" data-mode="action" ${this._readOnly ? "disabled" : ""}
-              title="Capture the changes the automation should replay">● Record action</button>
-            <button class="secondary" data-act="record-arm" data-mode="off" ${this._readOnly ? "disabled" : ""}
-              title="Stop capturing">Stop</button>
             <input class="activity-search" type="search" placeholder="Filter — entity or state…" />
             <button class="secondary" data-act="pause">Pause</button></div>
           <div id="recording"></div>
@@ -469,7 +473,11 @@ class Phil9000Panel extends HTMLElement {
           ${mark ? `<span class="rec-mark ${mark}" title="captured as a recorded ${mark}">${mark === "trigger" ? "●" : "⚡"}</span>` : '<span class="rec-mark"></span>'}
           <span class="act-time">${esc(formatClock(row.at))}</span>
           <span class="act-entity">${esc(row.entity_id)}</span>
-          <span class="act-change">${esc(row.old_state ?? "—")} → <b>${esc(row.new_state)}</b></span>
+          <span class="act-change">${
+            row.event
+              ? `🔘 fired <b>${esc(row.new_state)}</b>`
+              : `${esc(row.old_state ?? "—")} → <b>${esc(row.new_state)}</b>`
+          }</span>
           <button class="secondary mute-btn" data-act="mute" data-entity="${esc(row.entity_id)}"
             ${this._readOnly ? "disabled" : ""}
             title="Mute ${esc(row.entity_id)} — stop observing it (revert in the Entities panel)">⊘</button>
@@ -688,7 +696,7 @@ class Phil9000Panel extends HTMLElement {
     const steps = (p.steps || [])
       .map(
         (s, i) =>
-          `${i ? " → " : ""}${esc(s.entity_id)} = ${esc(s.to_state)}` +
+          `${i ? " → " : ""}${esc(s.entity_id)} = ${stateLabel(s.to_state)}` +
           (i ? ` (≤${Math.round((s.max_gap_seconds || 300) / 60)}m)` : ""),
       )
       .join("");

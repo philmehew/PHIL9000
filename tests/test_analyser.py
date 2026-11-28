@@ -505,3 +505,40 @@ def test_custom_prompt_template_is_used():
 def test_blank_template_falls_back_to_builtin():
     assert build_prompt("s", [], None) == build_prompt("s", [])
     assert build_prompt("s", [], "") == build_prompt("s", [])
+
+
+# -- event entities in the digest ---------------------------------------------
+
+
+def test_press_repeats_are_not_compressed_as_refresh_spam():
+    from custom_components.phil9000.analyser import summarise_history
+
+    # Same event type all week: for a state sensor this is refresh spam and
+    # gets squashed; for a button it is five deliberate presses a day.
+    button = "event.bedside_button"
+    events = {
+        button: [(datetime(2026, 11, day, 22, 0), "toggle") for day in range(16, 23)],
+    }
+    summary = summarise_history(events)
+    assert summary.count("toggle@22:00") == 7
+
+
+def test_chatty_button_survives_the_constant_drop():
+    from custom_components.phil9000.analyser import MAX_EVENTS_PER_ENTITY, summarise_history
+
+    events = {
+        "event.play_room_remote": [
+            (datetime(2026, 11, 22) + timedelta(minutes=index), "volume_up")
+            for index in range(MAX_EVENTS_PER_ENTITY + 5)
+        ]
+    }
+    summary = summarise_history(events)
+    assert "event.play_room_remote" in summary
+    assert "volume_up@" in summary
+
+
+def test_prompt_explains_event_entities():
+    from custom_components.phil9000.analyser import PROMPT_TEMPLATE
+
+    assert "event.*" in PROMPT_TEMPLATE
+    assert "pressed" in PROMPT_TEMPLATE

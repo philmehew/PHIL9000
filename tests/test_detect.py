@@ -252,3 +252,65 @@ class TestWrongStateRestart:
         )
         assert len(detections) == 1
         assert [o.timestamp for o in detections[0].matched] == [MON_17_31, MON_17_33]
+
+
+class TestAnyChangeSteps:
+    """to_state "*" matches any new state (input_button helpers, sensors)."""
+
+    def _press_behaviour(self) -> Behaviour:
+        return Behaviour(
+            id="press_then_light",
+            name="Button presses light",
+            steps=[
+                BehaviourStep("input_button.movie", "*"),
+                BehaviourStep("light.tv", "on", max_gap_seconds=60),
+            ],
+            status=BehaviourStatus.CONFIRMED,
+            cooldown_seconds=60,
+        )
+
+    def test_any_change_starts_the_sequence(self) -> None:
+        engine = DetectionEngine([self._press_behaviour()])
+        detections = engine.observe_all(
+            [
+                obs("input_button.movie", "2026-11-23T17:30:00+00:00", MON_17_30),
+                obs("light.tv", "on", MON_17_31),
+            ]
+        )
+        assert len(detections) == 1
+
+    def test_second_press_repeats_the_sequence(self) -> None:
+        engine = DetectionEngine([self._press_behaviour()])
+        engine.observe_all(
+            [
+                obs("input_button.movie", "2026-11-23T17:30:00+00:00", MON_17_30),
+                obs("light.tv", "on", MON_17_31),
+            ]
+        )
+        detections = engine.observe_all(
+            [
+                obs("light.tv", "off", MON_18_00),
+                obs("input_button.movie", "2026-11-23T18:05:00+00:00", MON_18_00.replace(minute=5)),
+                obs("light.tv", "on", MON_18_00.replace(minute=6)),
+            ]
+        )
+        assert len(detections) == 1  # a timestamp to_state could never have matched twice
+
+    def test_any_change_as_final_step(self) -> None:
+        behaviour = Behaviour(
+            id="light_then_press",
+            name="Light off then helper pressed",
+            steps=[
+                BehaviourStep("light.tv", "off"),
+                BehaviourStep("input_button.sleep", "*"),
+            ],
+            status=BehaviourStatus.CONFIRMED,
+        )
+        engine = DetectionEngine([behaviour])
+        detections = engine.observe_all(
+            [
+                obs("light.tv", "off", MON_17_30),
+                obs("input_button.sleep", "2026-11-23T17:31:00+00:00", MON_17_31),
+            ]
+        )
+        assert len(detections) == 1

@@ -121,6 +121,42 @@ class RecordingStore:
             raise
 
 
+class EventRingStore:
+    """Loads and saves the rolling buffer of event-entity firings (plain rows).
+
+    Lenient like the analysis log: this is history for the feed and the LLM
+    digest, not user data — a damaged file starts the ring empty.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def load(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        try:
+            with self.path.open("r", encoding="utf-8") as fh:
+                raw: Any = yaml.safe_load(fh) or {}
+            events = raw.get("events", [])
+            return [e for e in events if isinstance(e, dict) and e.get("at") and e.get("entity_id")]
+        except (OSError, yaml.YAMLError):
+            _LOGGER.warning("PHIL9000 ignoring unreadable events ring %s", self.path)
+            return []
+
+    def save(self, rows: list[dict[str, Any]]) -> None:
+        payload = {"version": _SCHEMA_VERSION, "events": rows}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                yaml.safe_dump(payload, fh, sort_keys=False, allow_unicode=True)
+            os.replace(tmp, self.path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+
 class AnalysisLogStore:
     """Loads and saves the recent analysis runs (plain dicts).
 

@@ -347,3 +347,106 @@ def test_direct_behaviour_points_at_the_llm_when_needed() -> None:
     triggers_only.capture("trigger", MOTION, "off", "on", datetime(2026, 11, 25, tzinfo=UTC))
     with pytest.raises(ValueError, match="action"):
         direct_behaviour(triggers_only)
+
+
+# -- any-change steps (input_button helpers, change-only sensors) --------------
+
+PRESS = "input_button.movie_mode"
+PRESS_AT = "2026-11-25T18:00:00+00:00"
+
+
+def _press_session() -> RecordingSession:
+    """A demonstration driven by a helper button: its state is the press time."""
+    session = RecordingSession()
+    session.set_mode("trigger")
+    session.capture(
+        "trigger",
+        PRESS,
+        "2026-11-25T17:00:00+00:00",
+        PRESS_AT,
+        datetime(2026, 11, 25, 18, 0, tzinfo=UTC),
+    )
+    session.set_mode("action")
+    session.capture("action", DESK, "off", "on", datetime(2026, 11, 25, 18, 0, 20, tzinfo=UTC))
+    return session
+
+
+def test_timestamp_to_state_looks_like_a_timestamp() -> None:
+    from custom_components.phil9000.recording import _looks_like_timestamp
+
+    assert _looks_like_timestamp(PRESS_AT)
+    assert not _looks_like_timestamp("on")
+    assert not _looks_like_timestamp("22.5")
+    assert not _looks_like_timestamp("")
+
+
+def test_parser_accepts_explicit_any_change_step() -> None:
+    result = parse_automation_reply(
+        _reply(steps=[{"entity_id": PRESS, "to_state": "*"}]), _press_session()
+    )
+    assert result is not None and result.proposal is not None
+    assert result.proposal["steps"][0]["to_state"] == "*"
+    assert result.warnings == []  # explicit any-change is exactly right
+
+
+def test_parser_forces_press_timestamps_to_any_change() -> None:
+    # A model echoing the captured timestamp could never match a future press.
+    session = _press_session()  # recorded trigger state is PRESS_AT (a timestamp)
+    result = parse_automation_reply(
+        _reply(steps=[{"entity_id": PRESS, "to_state": PRESS_AT}]), session
+    )
+    assert result is not None and result.proposal is not None
+    assert result.proposal["steps"][0]["to_state"] == "*"
+    assert any("any-change" in w for w in result.warnings)
+
+
+def test_direct_behaviour_wildcards_press_triggers() -> None:
+    behaviour = direct_behaviour(_press_session())
+    assert behaviour.steps[0].entity_id == PRESS
+    assert behaviour.steps[0].to_state == "*"
+
+
+def test_input_button_action_maps_to_press() -> None:
+    action = state_to_action(PRESS, PRESS_AT)
+    assert action is not None and action.service == "press"
+
+
+# -- event-entity captures (buttons, remotes) ---------------------------------
+
+
+def _press_event_session() -> RecordingSession:
+    session = RecordingSession()
+    session.set_mode("trigger")
+    session.capture(
+        "trigger",
+        "event.bedside_button",
+        None,  # a firing has no previous state
+        "toggle",
+        datetime(2026, 11, 25, 22, 0, tzinfo=UTC),
+    )
+    session.set_mode("action")
+    session.capture("action", DESK, "off", "on", datetime(2026, 11, 25, 22, 0, 10, tzinfo=UTC))
+    return session
+
+
+def test_event_captures_read_as_presses_in_the_prompt() -> None:
+    prompt = build_recording_prompt(_press_event_session(), known=[])
+    assert "event.bedside_button fired toggle" in prompt
+    assert "None -> toggle" not in prompt
+
+
+def test_press_steps_stay_exact_not_wildcards() -> None:
+    # Event types repeat by design: "toggle" is the right to_state forever.
+    behaviour = direct_behaviour(_press_event_session())
+    assert behaviour.steps[0].entity_id == "event.bedside_button"
+    assert behaviour.steps[0].to_state == "toggle"
+
+
+def test_parser_keeps_exact_event_types() -> None:
+    result = parse_automation_reply(
+        _reply(steps=[{"entity_id": "event.bedside_button", "to_state": "toggle"}]),
+        _press_event_session(),
+    )
+    assert result is not None and result.proposal is not None
+    assert result.proposal["steps"][0]["to_state"] == "toggle"
+    assert result.warnings == []

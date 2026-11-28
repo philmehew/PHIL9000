@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from . import analysis
-from .activity import DEFAULT_LIMIT
+from .activity import DEFAULT_LIMIT, merge_event_history
 from .const import (
     ATTR_BEHAVIOUR_ID,
     BEHAVIOURS_FILE,
@@ -48,6 +48,32 @@ def _observed_entities(hass: HomeAssistant) -> list[str]:
     if runtime is None:
         return []
     return runtime.subscriptions.expand(hass.states.async_entity_ids(), runtime.is_noise)
+
+
+def _event_feed(runtime: Phil9000Runtime) -> list[dict[str, Any]]:
+    """Ring rows eligible for the feed: still observed, inside the window.
+
+    Filtered at read time, not write time, so muting a chatty event entity
+    (a Frigate camera's motion events, say) also hides the history it left
+    behind, exactly like a muted state entity.
+    """
+    from datetime import UTC, datetime, timedelta  # function-local: purity guard
+
+    cutoff = datetime.now(UTC) - timedelta(hours=analysis.ACTIVITY_LOOKBACK_HOURS)
+    rows: list[dict[str, Any]] = []
+    for row in runtime.event_rows:
+        entity_id = row.get("entity_id")
+        if not isinstance(entity_id, str):
+            continue
+        if not runtime.subscriptions.matches(entity_id, runtime.is_noise):
+            continue
+        try:
+            if datetime.fromisoformat(str(row.get("at"))) < cutoff:
+                continue
+        except ValueError:
+            continue
+        rows.append(row)
+    return rows
 
 
 def _entry(hass: HomeAssistant):  # noqa: ANN202 — ConfigEntry (HA type, purity guard)
@@ -178,7 +204,8 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_activity(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        if _require(hass, connection, msg) is None:
+        runtime = _require(hass, connection, msg)
+        if runtime is None:
             return
         entities = _observed_entities(hass)
         # Diagnostics the panel shows under the heading: when the feed looks
@@ -191,14 +218,23 @@ def async_setup(hass: HomeAssistant) -> None:
             # A short list is usually the real answer, so send it when small.
             "observed_entities": entities if len(entities) <= 10 else None,
         }
+        events = _event_feed(runtime)
+        hint = None
         try:
             items = await analysis.async_fetch_activity(hass, entities, msg["limit"])
         except analysis.AnalysisUnavailableError as err:
             # Empty feed plus a hint (no recorder, or the entities are excluded
-            # from it) is more useful to the panel than a hard error.
-            connection.send_result(msg["id"], {"items": [], "hint": str(err), **info})
-            return
-        connection.send_result(msg["id"], {"items": items, **info})
+            # from it) is more useful to the panel than a hard error — but
+            # presses from the ring are still real history worth showing.
+            items = []
+            hint = str(err)
+        merged = merge_event_history(items, events, msg["limit"])
+        result: dict[str, Any] = {"items": merged, **info}
+        if hint is not None and merged:
+            result["hint"] = f"{hint} (button presses below come from PHIL9000's own log)"
+        elif hint is not None:
+            result["hint"] = hint
+        connection.send_result(msg["id"], result)
 
     @websocket_api.websocket_command({"type": "phil9000/subscribe_activity"})
     @websocket_api.async_response

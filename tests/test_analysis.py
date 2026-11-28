@@ -20,6 +20,7 @@ from custom_components.phil9000.analysis import (
     async_run_analysis,
 )
 from custom_components.phil9000.const import (
+    CONF_ENTITIES,
     DOMAIN,
     OPTION_ANALYSIS_ENABLED,
     OPTION_CUSTOM_PROMPT,
@@ -478,3 +479,69 @@ async def test_custom_prompt_reaches_the_agent(hass: HomeAssistant) -> None:
     assert agent.calls[0][1].startswith("HOUSE HISTORY:")
     assert "KNOWN:" in agent.calls[0][1]
     assert "binary_sensor.office_presence" in agent.calls[0][1]  # {summary} expanded
+
+
+# -- event ring in the analysis context ---------------------------------------
+
+
+async def test_button_presses_fold_into_the_digest(hass: HomeAssistant) -> None:
+    """The recorder never holds presses; the ring is how the LLM sees them."""
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass, data={CONF_ENTITIES: [OFFICE, KITCHEN, "event"]})
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+    runtime.event_rows.extend(
+        [
+            {
+                "entity_id": "event.bedside_button",
+                "at": "2026-11-23T22:00:00+00:00",
+                "old_state": None,
+                "new_state": "toggle",
+                "event": True,
+            },
+            # Muted after capture: must not leak into the digest.
+            {
+                "entity_id": "event.muted_cam_motion",
+                "at": "2026-11-23T22:05:00+00:00",
+                "old_state": None,
+                "new_state": "motion",
+                "event": True,
+            },
+        ]
+    )
+    runtime.subscriptions.excluded.add("event.muted_cam_motion")
+
+    agent = FakeAgent()
+    await async_run_analysis(
+        hass, entry, runtime, history_provider=_fake_history, agent_call=agent, notify=False
+    )
+    prompt = agent.calls[0][1]
+    assert "event.bedside_button" in prompt
+    assert "toggle@22:00" in prompt
+    assert "event.muted_cam_motion" not in prompt
+    assert any("button presses" in e["message"] for e in runtime.analysis_log)
+
+
+async def test_presses_alone_are_enough_history(hass: HomeAssistant) -> None:
+    """A brand-new install with no recorder rows can still be analysed."""
+    entry = await setup_entry(hass, data={CONF_ENTITIES: ["event"]})
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+    runtime.event_rows.append(
+        {
+            "entity_id": "event.bedside_button",
+            "at": "2026-11-23T22:00:00+00:00",
+            "old_state": None,
+            "new_state": "toggle",
+            "event": True,
+        }
+    )
+
+    async def empty_history():
+        return {}
+
+    agent = FakeAgent()
+    await async_run_analysis(
+        hass, entry, runtime, history_provider=empty_history, agent_call=agent, notify=False
+    )
+    assert "event.bedside_button" in agent.calls[0][1]

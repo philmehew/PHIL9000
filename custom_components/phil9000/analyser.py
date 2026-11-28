@@ -119,6 +119,14 @@ History of entity state changes (timestamps are UTC, one line per entity, days i
 order):
 {summary}
 
+Entities named event.* are event entities — buttons, remotes, doorbells: what is \
+shown is the type of each firing, so "toggle@17:30" means the user pressed that \
+button at 17:30. Presses are deliberate human actions and among the strongest \
+routine markers there are (a bedside button at 22:00 every weeknight); the same \
+type repeating is real activity, never refresh spam. A press followed within \
+seconds by device changes is the user teaching by hand — propose the whole \
+sequence with the press as the first step, using the event type as its to_state.
+
 Current behaviours (JSON; "status" is the user's decision, not yours):
 {known}
 
@@ -212,7 +220,12 @@ def summarise_history(
         out: list[str] = []
         for entity_id in sorted(events_by_entity):
             all_events = events_by_entity[entity_id]
-            constant = len({state for _, state in all_events}) <= 1
+            # Every firing of an event entity (button, remote) is a discrete
+            # human action: "toggle" repeated five times is five presses, not
+            # one state refreshing on a timer. Never compress or drop them.
+            constant = len({state for _, state in all_events}) <= 1 and not entity_id.startswith(
+                "event."
+            )
             if constant and len(all_events) > MAX_EVENTS_PER_ENTITY:
                 continue
             if constant:

@@ -57,6 +57,17 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   `phil9000/run_analysis`, `phil9000/set_status`, `phil9000/set_name`,
   `phil9000/set_actions`).
 
+- **Buttons and remotes are real triggers.** Tick the **Buttons & remotes (press
+  events)** domain (off by default) and PHIL9000 listens for Home Assistant *event
+  entities* — Zigbee2MQTT/ZHA/Shelly buttons, doorbells — whose presses never touch
+  the state machine. Each firing appears in the feed as `🔘 fired toggle`, is
+  recordable as a trigger step (the event type is the step's state, so single/double/
+  hold are distinct triggers), and reaches the nightly LLM digest too. Event firings
+  don't live in HA's states recorder, so PHIL9000 keeps its own rolling history
+  (`phil9000/events_ring.yaml`, last 1000 firings) for the feed and the digest.
+  Chatty producer (a camera's motion events, a wake word)? Mute its entity with ⊘ —
+  muting hides the history it left behind as well.
+
 - **Noisy entity? Mute it.** Every activity row has a ⊘ button: the entity is added to
   the integration's exclusion list (persisted), stops being observed immediately — no
   feed rows, no behaviour steps, no LLM digest lines — and the change applies *in
@@ -126,6 +137,12 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   deterministic Python engine, editable like any other behaviour. **Save as-is (no
   LLM)** skips the proposal entirely for simple on/off demonstrations. The recording
   survives restarts (`phil9000/recording.yaml`).
+  Helper **input buttons** work as triggers: their state is the last press time, so
+  recorded press steps become **any-change** steps (`to_state: "*"` in the YAML, shown
+  as "any change" in the panel) that match every future press — and a helper recorded
+  as an *action* replays as `input_button.press`. (The device `button` domain is
+  deliberately not observable: pressing it changes no state, so no pipeline could see
+  it — map physical buttons to an `input_button` helper to record them.)
   (`phil9000/record_status`, `phil9000/record_mode`, `phil9000/record_remove`,
   `phil9000/record_notes`, `phil9000/record_clear`, `phil9000/record_propose`,
   `phil9000/record_refine`, `phil9000/record_save`, `phil9000/subscribe_recording`)

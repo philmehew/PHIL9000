@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.9.0 — 2026-11-28
+
+### Buttons and remotes are real triggers (event-entity support)
+
+- PHIL9000 now listens to Home Assistant's **event bus**: firings of *event
+  entities* (Zigbee2MQTT/ZHA/Shelly buttons, doorbells) never touch the state
+  machine, and the `event` domain is now observable ("Buttons & remotes (press
+  events)", off by default — camera motion/wake-word producers make it a poor
+  default). Each firing joins the live feed as `🔘 fired toggle`, the detection
+  engine, **Record** capture and the LLM digest. Event types repeat by design,
+  so steps are exact (`event.remote = toggle`) and single/double/hold are
+  distinct triggers for free.
+- Event firings don't live in HA's states recorder, so PHIL9000 keeps its own
+  rolling history (`phil9000/events_ring.yaml`, last 1000 firings, atomic save,
+  lenient load): the feed and the digest read it, and it survives restarts.
+  The state-changed path now ignores `event.*` entities — they mirror the last
+  type as state but write no row at all for repeat presses, so the bus listener
+  owns that domain exclusively (no doubling, no thinning).
+- The **analysis context** now folds presses into the digest as ordinary
+  entity lines, the prompt explains them ("a press is a deliberate human
+  action… a press followed by device changes is the user teaching by hand"),
+  and the "constant state = refresh spam" squash never touches event entities:
+  five `toggle`s are five presses. A household whose only history is presses
+  can now be analysed at all.
+- Muting is the selectivity control: filtering happens at read time, so
+  muting a chatty producer (a Frigate camera's motion events) hides the ring
+  history it left behind too, exactly like a muted state entity.
+- New observable domain **input_button** (helper buttons whose state is the
+  last press time) and **any-change steps**: the detection engine accepts
+  `to_state: "*"`, and the Record flow wildcards press timestamps
+  automatically (a captured timestamp could never recur). A helper recorded
+  as an *action* replays as `input_button.press`. The device `button` domain
+  remains deliberately unobservable — pressing it changes no state.
+- The **Record trigger / Record action / Stop** buttons moved into the top
+  header row after *Analyse now* (they were crowded next to the feed title);
+  the row wraps on narrow windows.
+
 ## v0.8.0 — 2026-11-28
 
 ### Record: teach a rule by demonstration

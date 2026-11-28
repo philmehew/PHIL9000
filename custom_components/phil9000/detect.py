@@ -198,7 +198,11 @@ class DetectionEngine:
 
     @staticmethod
     def _matches(step: Any, observation: Observation) -> bool:
-        return observation.entity_id == step.entity_id and observation.new_state == step.to_state
+        if observation.entity_id != step.entity_id:
+            return False
+        # "*" is the any-change step: for entities whose new state never
+        # repeats (input_button helpers, sensors) — see recording.py.
+        return step.to_state == "*" or observation.new_state == step.to_state
 
     def _complete(self, behaviour: Behaviour, moment: datetime) -> Detection | None:
         matched = self._partial.pop(behaviour.id)

@@ -19,6 +19,8 @@ Timestamps must be aware UTC isoformat strings; they sort lexicographically
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 # Rows kept in the feed: the panel box shows ~25 rows visibly and scrolls,
@@ -56,13 +58,68 @@ def is_feed_noise(row: dict[str, Any]) -> bool:
     )
 
 
+def merge_event_history(
+    state_rows: list[dict[str, Any]],
+    event_rows: list[dict[str, Any]],
+    limit: int = DEFAULT_LIMIT,
+) -> list[dict[str, Any]]:
+    """Merge recorder rows with PHIL9000's own event ring (newest first, capped).
+
+    An event entity writes a recorder row only when the *type* of its last
+    firing changes — repeat presses never reach the states table, while a
+    type change appears in both sources. For entities the ring covers, the
+    ring is therefore the authoritative history: recorder rows for them are
+    dropped rather than risking doubled or thinned presses.
+    """
+    covered = {row.get("entity_id") for row in event_rows}
+    merged = [row for row in state_rows if row.get("entity_id") not in covered]
+    merged.extend(event_rows)
+    return dedupe_activity(merged, limit)
+
+
+def ring_history(
+    event_rows: list[dict[str, Any]],
+    since: datetime,
+    matches: Callable[[str], bool] = lambda entity_id: True,  # noqa: ARG005
+) -> dict[str, list[tuple[datetime, str]]]:
+    """Recent ring firings as ``entity_id -> [(timestamp, event type), ...]``.
+
+    The same shape the recorder gives the analyser, so button and remote
+    presses fold into the analysis digest exactly like state changes — the
+    model gets to see "the user pressed the bedside button", which is the
+    loudest human signal a smart home produces. Rows before ``since`` or for
+    entities no longer observed (muted after the fact) are skipped.
+    """
+    history: dict[str, list[tuple[datetime, str]]] = {}
+    for row in event_rows:
+        entity_id = row.get("entity_id")
+        event_type = row.get("new_state")
+        if not isinstance(entity_id, str) or not isinstance(event_type, str):
+            continue
+        if not matches(entity_id):
+            continue
+        try:
+            at = datetime.fromisoformat(str(row.get("at")))
+        except ValueError:
+            continue
+        if at >= since:
+            history.setdefault(entity_id, []).append((at, event_type))
+    return history
+
+
 def dedupe_activity(rows: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
-    """Merge activity rows: drop non-changes, noise and no-ops, cap."""
+    """Merge activity rows: drop non-changes, noise and no-ops, cap.
+
+    Rows flagged ``"event": True`` (event-entity firings from PHIL9000's
+    rolling buffer) bypass the state-transition rules: an event has no
+    previous state, and two presses of the same type in a row are real,
+    separate activity.
+    """
     by_entity: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         if not row.get("at") or row.get("state_changed") is False:
             continue
-        if is_feed_noise(row):
+        if not row.get("event") and is_feed_noise(row):
             continue
         by_entity.setdefault(row["entity_id"], []).append(row)
 
@@ -71,7 +128,11 @@ def dedupe_activity(rows: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> l
         entity_rows.sort(key=lambda r: r["at"])
         previous_new: str | None = None
         for row in entity_rows:
-            if previous_new is not None and row.get("new_state") == previous_new:
+            if (
+                not row.get("event")
+                and previous_new is not None
+                and row.get("new_state") == previous_new
+            ):
                 continue  # no-op row: entity ended in the same state
             previous_new = row.get("new_state")
             survivors.append(row)

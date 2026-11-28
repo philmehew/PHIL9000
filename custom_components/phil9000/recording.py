@@ -39,6 +39,20 @@ BEHAVIOUR_ID_PREFIX = "rec-"
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# to_state wildcard: match any new state (entities whose state never repeats).
+ANY_CHANGE = "*"
+
+
+def _looks_like_timestamp(state: str) -> bool:
+    """True for datetime-shaped states (input_button helpers report press time)."""
+    if not state or not state[0].isdigit():
+        return False
+    try:
+        datetime.fromisoformat(state)
+    except ValueError:
+        return False
+    return True
+
 
 @dataclass(slots=True)
 class RecordedItem:
@@ -207,10 +221,14 @@ def _format_items(items: list[RecordedItem]) -> str:
     for item in items:
         moment = item.at.astimezone(UTC)
         gap = f" (+{round((item.at - previous).total_seconds())}s)" if previous else ""
-        lines.append(
-            f"- {moment:%a %H:%M}{gap}: {item.entity_id} {item.from_state or '—'} -> "
-            f"{item.to_state}"
+        # Event entities have no previous state: a capture is one firing of
+        # the named event type, and the panel's wording should say so.
+        change = (
+            f"fired {item.to_state}"
+            if item.entity_id.startswith("event.")
+            else f"{item.from_state or '—'} -> {item.to_state}"
         )
+        lines.append(f"- {moment:%a %H:%M}{gap}: {item.entity_id} {change}")
         previous = item.at
     return "\n".join(lines)
 
@@ -271,7 +289,8 @@ TRIGGERS), then performed the changes the automation should later replay (the AC
 Turn this one demonstration into the automation the user most likely means.
 
 Recorded TRIGGERS, in the order they happened (times UTC; "+Ns" is the gap since the \
-previous trigger):
+previous trigger). "event.*" entities are buttons/remotes: "fired <type>" is one \
+press — keep the type as the exact to_state (presses repeat, unlike timestamps):
 {triggers}
 
 Recorded ACTIONS — state changes the user caused, which the automation must reproduce:
@@ -285,7 +304,9 @@ Behaviours this household already knows (name [status]) — do not duplicate one
 
 Decide the sensible generalisation:
 - "steps" are the triggers: use ONLY the recorded trigger entities with their recorded \
-target states, in the order that best detects the situation.
+target states, in the order that best detects the situation. Where a recorded new state \
+is a press timestamp or otherwise never repeats (an input_button helper), use \
+"to_state": "*" — any change.
 - "max_gap_seconds": the observed gap with room to breathe (usually 2-4x, minimum 60).
 - "weekdays" (ISO 1=Mon..7=Sun) and "time_start"/"time_end" ("HH:MM" UTC): set them only \
 when the demo or notes clearly imply a schedule (an evening demo with lights-on suggests \
@@ -428,7 +449,17 @@ def parse_automation_reply(text: str, session: RecordingSession) -> ProposalResu
         if not isinstance(to_state, str) or not to_state:
             result.dropped.append((f"step {entity_id}", "missing to_state"))
             continue
-        if to_state not in trigger_states[entity_id]:
+        if to_state == ANY_CHANGE:
+            pass  # explicit any-change (input_button helpers, sensors)
+        elif any(_looks_like_timestamp(s) for s in trigger_states[entity_id]):
+            # A press timestamp never recurs: an exact to_state could match no
+            # future press, so the step is forced to any-change.
+            to_state = ANY_CHANGE
+            result.warnings.append(
+                f"step {entity_id}: recorded state is a press timestamp — "
+                "made it an any-change step"
+            )
+        elif to_state not in trigger_states[entity_id]:
             result.warnings.append(
                 f"step {entity_id}={to_state} differs from the recorded state(s) "
                 f"{'/'.join(trigger_states[entity_id])} — kept as proposed"
@@ -566,6 +597,9 @@ _DOMAIN_STATE_SERVICES: dict[str, dict[str, str]] = {
 def state_to_action(entity_id: str, to_state: str) -> BehaviourAction | None:
     """Best mechanical service call to bring entity_id to to_state (None if none)."""
     domain = entity_id.partition(".")[0]
+    if domain == "input_button":
+        # A helper button's state is the press time: replaying it means pressing.
+        return BehaviourAction(domain=domain, service="press", entity_id=entity_id)
     service = _DOMAIN_STATE_SERVICES.get(domain, {}).get(to_state)
     if service is None:
         service = {"on": "turn_on", "off": "turn_off"}.get(to_state)
@@ -604,8 +638,10 @@ def direct_behaviour(session: RecordingSession) -> Behaviour:
         else:
             observed = round((item.at - previous).total_seconds())
             gap = max(60, min(observed * 2, 3600))  # the observed rhythm, with slack
+        # Press-timestamp states never recur: record them as any-change.
+        to_state = ANY_CHANGE if _looks_like_timestamp(item.to_state) else item.to_state
         steps.append(
-            BehaviourStep(entity_id=item.entity_id, to_state=item.to_state, max_gap_seconds=gap)
+            BehaviourStep(entity_id=item.entity_id, to_state=to_state, max_gap_seconds=gap)
         )
         previous = item.at
 

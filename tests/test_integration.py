@@ -8,6 +8,7 @@ tests/helpers.py.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -26,7 +27,13 @@ from custom_components.phil9000.const import (
     SERVICE_DISMISS_BEHAVIOUR,
     SERVICE_RUN_ANALYSIS,
 )
-from custom_components.phil9000.models import BehaviourAction, BehaviourStatus
+from custom_components.phil9000.models import (
+    Behaviour,
+    BehaviourAction,
+    BehaviourStatus,
+    BehaviourStep,
+)
+from custom_components.phil9000.recording import direct_behaviour
 from custom_components.phil9000.seed import end_of_work_day
 from tests.helpers import (
     ACTION_DOMAIN,
@@ -446,3 +453,120 @@ async def test_recording_survives_entry_reload(hass: HomeAssistant) -> None:
     assert restored.recording.mode == "trigger"
     assert [i.entity_id for i in restored.recording.triggers] == [OFFICE]
     assert restored.recording.notes == "weekday demo"
+
+
+# -- event entities (buttons, remotes) ----------------------------------------
+
+BUTTON = "event.bedside_button"
+DESK = "switch.desk"
+
+
+def _fire_event(hass: HomeAssistant, entity_id: str, event_type: str) -> None:
+    """One firing of an event entity, as HA fires it."""
+    hass.bus.async_fire(
+        "event", {"entity_id": entity_id, "event_type": event_type, "event_data": {}}
+    )
+
+
+def _press_behaviour() -> Behaviour:
+    return Behaviour(
+        id="press-then-desk",
+        name="Bedside button wakes the desk",
+        steps=[
+            BehaviourStep(BUTTON, "toggle"),
+            BehaviourStep(DESK, "on", max_gap_seconds=120),
+        ],
+        status=BehaviourStatus.CONFIRMED,
+    )
+
+
+async def test_event_firing_detects_and_records_history(hass: HomeAssistant) -> None:
+    seed_behaviours(hass, _press_behaviour())
+    await setup_entry(hass, data={CONF_ENTITIES: [BUTTON, DESK]})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+    detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+    feed: list[dict] = []
+    runtime.activity_subscribers.append(feed.append)
+
+    _fire_event(hass, BUTTON, "toggle")
+    _fire_state_changed(hass, DESK, "off", "on", datetime.now(UTC))
+    await hass.async_block_till_done()
+
+    assert len(detections) == 1
+    assert [r["new_state"] for r in feed] == ["toggle", "on"]
+    assert feed[0]["event"] is True and feed[0]["old_state"] is None
+    # The ring holds the press for the feed's history and the analysis digest.
+    assert [r["entity_id"] for r in runtime.event_rows] == [BUTTON]
+
+    await flush_saves(hass)
+    ring_file = Path(hass.config.path("phil9000", "events_ring.yaml"))
+    assert ring_file.exists()
+
+
+async def test_unobserved_event_entities_are_ignored(hass: HomeAssistant) -> None:
+    await setup_entry(hass, data={CONF_ENTITIES: [DESK]})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+
+    _fire_event(hass, "event.someones_camera", "motion")
+    await hass.async_block_till_done()
+    assert runtime.event_rows == []
+
+
+async def test_event_state_rows_do_not_double_count_presses(hass: HomeAssistant) -> None:
+    """Event entities also write state rows — the bus listener owns them."""
+    await setup_entry(hass, data={CONF_ENTITIES: [BUTTON]})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+    feed: list[dict] = []
+    runtime.activity_subscribers.append(feed.append)
+
+    _fire_state_changed(hass, BUTTON, "unknown", "toggle", datetime.now(UTC))
+    await hass.async_block_till_done()
+    assert feed == []  # the state path contributes nothing
+
+    _fire_event(hass, BUTTON, "toggle")
+    await hass.async_block_till_done()
+    assert [r.get("event") for r in feed] == [True]
+
+
+async def test_event_ring_survives_reload(hass: HomeAssistant) -> None:
+    await setup_entry(hass, data={CONF_ENTITIES: [BUTTON]})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.event_rows.clear()  # the phpc config dir is shared between tests
+
+    _fire_event(hass, BUTTON, "single")
+    await hass.async_block_till_done()
+    await flush_saves(hass)
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    restored = hass.data[DOMAIN][entry.entry_id]
+    assert [r["new_state"] for r in restored.event_rows] == ["single"]
+
+
+async def test_recording_captures_presses(hass: HomeAssistant) -> None:
+    """A recorded press becomes an exact event-type step, no wildcard fudge."""
+    await setup_entry(hass, data={CONF_ENTITIES: [BUTTON, DESK]})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.recording.clear()  # the phpc config dir is shared between tests
+    runtime.recording.set_mode("trigger")
+
+    _fire_event(hass, BUTTON, "toggle")
+    await hass.async_block_till_done()
+    captured = runtime.recording.triggers
+    assert [(i.entity_id, i.from_state, i.to_state) for i in captured] == [(BUTTON, None, "toggle")]
+
+    # And direct (no-LLM) saving replays it: press step + a simple action.
+    runtime.recording.set_mode("action")
+    _fire_state_changed(hass, DESK, "off", "on", datetime.now(UTC))
+    await hass.async_block_till_done()
+    behaviour = direct_behaviour(runtime.recording)
+    assert behaviour.steps[0].entity_id == BUTTON
+    assert behaviour.steps[0].to_state == "toggle"

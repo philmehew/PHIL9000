@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from .activity import DEFAULT_LIMIT, dedupe_activity
+from .activity import DEFAULT_LIMIT, dedupe_activity, ring_history
 from .analyser import (
     DEFAULT_LOOKBACK_DAYS,
     build_prompt,
@@ -382,6 +382,17 @@ async def _async_analysis_pass(
     call = agent_call or async_call_agent
 
     events_by_entity = await provider()
+    # Button/remote presses never reach the states recorder, so the ring is
+    # their only history; fold it in and the model sees "the user pressed X"
+    # like any other signal. Ring rows *replace* recorder rows for the same
+    # entities (the recorder under-reports repeat presses — see activity.py).
+    presses = ring_history(
+        runtime.event_rows,
+        datetime.now(UTC) - timedelta(days=days),
+        lambda entity_id: runtime.subscriptions.matches(entity_id, runtime.is_noise),
+    )
+    for entity_id, rows in presses.items():
+        events_by_entity[entity_id] = sorted(rows)
     if not any(events_by_entity.values()):
         raise AnalysisUnavailableError("no recorded history for the observed entities yet")
 
@@ -392,8 +403,13 @@ async def _async_analysis_pass(
     _log_run(
         runtime,
         "info",
-        f"Collected {total_events} state changes from {live_entities} entities, "
-        f"{days}-day window, {len(existing)} known {known}",
+        f"Collected {total_events} state changes from {live_entities} entities"
+        + (
+            f" (incl. {sum(len(rows) for rows in presses.values())} button presses)"
+            if presses
+            else ""
+        )
+        + f", {days}-day window, {len(existing)} known {known}",
     )
     prompt = build_prompt(
         summarise_history(events_by_entity),

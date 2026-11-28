@@ -120,3 +120,72 @@ def test_default_limit_is_1000():
         for h, i in enumerate(range(DEFAULT_LIMIT + 200))
     ]
     assert len(dedupe_activity(rows)) == DEFAULT_LIMIT
+
+
+# -- event-entity firings (buttons, remotes) ---------------------------------
+
+from custom_components.phil9000.activity import merge_event_history, ring_history  # noqa: E402
+
+BUTTON = "event.bedside_button"
+
+
+def event_row(entity: str, at: str, fired: str) -> dict:
+    return row(entity, at, fired, None, event=True)
+
+
+def test_event_rows_bypass_the_state_transition_rules():
+    # A press has no previous state, and two presses of the same type are
+    # real, separate activity — the rules that squash state no-ops must not
+    # touch them.
+    rows = [
+        event_row(BUTTON, "2026-11-22T21:00:00+00:00", "toggle"),
+        event_row(BUTTON, "2026-11-22T21:00:30+00:00", "toggle"),
+    ]
+    feed = dedupe_activity(rows)
+    assert [r["at"] for r in feed] == [
+        "2026-11-22T21:00:30+00:00",
+        "2026-11-22T21:00:00+00:00",
+    ]
+
+
+def test_merge_event_history_replaces_recorder_rows_for_presses():
+    # The recorder saw one row (type changed off→toggle); the ring saw both
+    # presses. The ring wins for its entities; other entities are untouched.
+    state_rows = [
+        row(BUTTON, "2026-11-22T21:00:30+00:00", "toggle", "off"),
+        row(OFFICE, "2026-11-22T17:30:00+00:00", "off", "on"),
+    ]
+    events = [
+        event_row(BUTTON, "2026-11-22T21:00:00+00:00", "toggle"),
+        event_row(BUTTON, "2026-11-22T21:00:30+00:00", "toggle"),
+    ]
+    feed = merge_event_history(state_rows, events)
+    assert [(r["entity_id"], r["at"]) for r in feed] == [
+        (BUTTON, "2026-11-22T21:00:30+00:00"),
+        (BUTTON, "2026-11-22T21:00:00+00:00"),
+        (OFFICE, "2026-11-22T17:30:00+00:00"),
+    ]
+
+
+def test_ring_history_filters_window_and_observations():
+    from datetime import UTC, datetime
+
+    since = datetime(2026, 11, 20, tzinfo=UTC)
+    rows = [
+        event_row(BUTTON, "2026-11-22T21:00:00+00:00", "toggle"),
+        event_row(BUTTON, "2026-11-19T21:00:00+00:00", "toggle"),  # before `since`
+        event_row("event.muted_cam", "2026-11-22T21:30:00+00:00", "motion"),  # not observed
+    ]
+    history = ring_history(rows, since, matches=lambda e: e == BUTTON)
+    assert list(history) == [BUTTON]
+    assert history[BUTTON] == [(datetime.fromisoformat("2026-11-22T21:00:00+00:00"), "toggle")]
+
+
+def test_ring_history_ignores_malformed_rows():
+    from datetime import UTC, datetime
+
+    rows = [
+        {"entity_id": BUTTON, "at": "not-a-date", "new_state": "toggle"},
+        {"entity_id": BUTTON, "at": "2026-11-22T21:00:00+00:00", "new_state": None},
+    ]
+    assert ring_history(rows, datetime(2026, 11, 20, tzinfo=UTC)) == {}

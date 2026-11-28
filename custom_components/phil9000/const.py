@@ -26,6 +26,11 @@ SERVICE_RUN_ANALYSIS = "run_analysis"
 # Entity domains worth observing (config-flow picker). Chosen to cover
 # presence, activity and controllable-device signals while leaving out
 # system/utility domains that would bury the list (update, firmware, sun...).
+# The ``button`` domain is deliberately absent: pressing a button entity never
+# changes its state (it stays "unknown"; the press is a button.press event on
+# the bus), so a state-change pipeline could not observe it. Presses arrive via
+# the observable ``event`` domain (event entities: buttons, remotes, timers)
+# and through the ``input_button`` helper — whose state is the last press time.
 OBSERVABLE_DOMAINS = frozenset(
     {
         "appliance",
@@ -33,9 +38,11 @@ OBSERVABLE_DOMAINS = frozenset(
         "climate",
         "cover",
         "device_tracker",
+        "event",
         "fan",
         "humidifier",
         "input_boolean",
+        "input_button",
         "input_select",
         "light",
         "lock",
@@ -58,9 +65,11 @@ OBSERVABLE_DOMAIN_LABELS = {
     "climate": "Climate",
     "cover": "Covers (blinds, garage)",
     "device_tracker": "Device trackers (phones, tags)",
+    "event": "Buttons & remotes (press events)",
     "fan": "Fans",
     "humidifier": "Humidifiers",
     "input_boolean": "Helpers (toggles)",
+    "input_button": "Helpers (button presses)",
     "input_select": "Helpers (select boxes)",
     "light": "Lights",
     "lock": "Locks",
@@ -113,6 +122,11 @@ ANALYSIS_LOG_LIMIT = 50
 # The recording in progress (triggers/actions/notes/proposal), so an HA
 # restart mid-recording does not lose the user's demonstration.
 RECORDING_FILE = "recording.yaml"
+# Rolling buffer of button/remote event firings. Events are not state
+# changes, so the states recorder never holds them; PHIL9000 keeps its own
+# recent history for the activity feed, detection evidence and LLM digest.
+EVENT_RING_FILE = "events_ring.yaml"
+EVENT_RING_LIMIT = 1000
 # Occurrence-counter saves are debounced: a noisy candidate can bump
 # counters on every match, and behaviours.yaml need not rewrite that often.
 SAVE_DEBOUNCE_SECONDS = 30

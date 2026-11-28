@@ -34,6 +34,8 @@ from .const import (
     CONFIG_DIR,
     DOMAIN,
     EVENT_BEHAVIOUR_DETECTED,
+    EVENT_RING_FILE,
+    EVENT_RING_LIMIT,
     OPTION_ANALYSIS_ENABLED,
     PANEL_URL_PATH,
     PANEL_WEBCOMPONENT,
@@ -56,7 +58,7 @@ from .models import (
 )
 from .recording import RecordingSession
 from .subscriptions import Subscriptions, registry_is_noise
-from .yaml_store import AnalysisLogStore, BehaviourStore, RecordingStore
+from .yaml_store import AnalysisLogStore, BehaviourStore, EventRingStore, RecordingStore
 
 __all__ = [
     "Behaviour",
@@ -114,6 +116,14 @@ class Phil9000Runtime:
     # Panel subscribers for the live recording session (same contract: one
     # full session snapshot per change, callbacks never raising).
     recording_subscribers: list[Callable[[dict], None]] = field(default_factory=list)
+    # Rolling buffer of event-entity firings (buttons, remotes): rows like
+    # {"entity_id", "at", "old_state": None, "new_state": <event type>,
+    # "event": True}, oldest first. Events are not state changes, so the
+    # states recorder never holds them — this ring is the history the feed,
+    # detection evidence and the LLM digest read.
+    event_rows: list[dict] = field(default_factory=list)
+    event_store: EventRingStore | None = None
+    _event_save_pending: bool = False
 
     # -- mutations shared by services and the websocket API --------------
 
@@ -189,6 +199,28 @@ class Phil9000Runtime:
 
         async_call_later(hass, SAVE_DEBOUNCE_SECONDS, _flush)
 
+    def schedule_event_save(self, hass: HomeAssistant) -> None:
+        """Persist the event ring soon, collapsed: button runs arrive in bursts."""
+        if self._event_save_pending:
+            return
+        self._event_save_pending = True
+        from datetime import datetime  # function-local: purity guard
+
+        from homeassistant.helpers.event import (  # function-local: purity guard
+            async_call_later,
+        )
+
+        async def _flush(now: datetime) -> None:  # noqa: ARG001
+            self._event_save_pending = False
+            if self.event_store is None:
+                return
+            try:
+                await hass.async_add_executor_job(self.event_store.save, list(self.event_rows))
+            except OSError:
+                _LOGGER.warning("PHIL9000 could not persist the events ring", exc_info=True)
+
+        async_call_later(hass, SAVE_DEBOUNCE_SECONDS, _flush)
+
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
     hass.data.setdefault(DOMAIN, {})
@@ -235,6 +267,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # feed. Loaded leniently (never fails setup — it is decoration, not data).
     analysis_log_store = AnalysisLogStore(hass.config.path(CONFIG_DIR, ANALYSIS_LOG_FILE))
     recording_store = RecordingStore(hass.config.path(CONFIG_DIR, RECORDING_FILE))
+    event_store = EventRingStore(hass.config.path(CONFIG_DIR, EVENT_RING_FILE))
     runtime = Phil9000Runtime(
         engine=engine,
         store=store,
@@ -245,11 +278,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         analysis_log_store=analysis_log_store,
         recording=await hass.async_add_executor_job(recording_store.load),
         recording_store=recording_store,
+        event_rows=await hass.async_add_executor_job(event_store.load),
+        event_store=event_store,
     )
     hass.data[DOMAIN][entry.entry_id] = runtime
 
     unsub = hass.bus.async_listen(EVENT_STATE_CHANGED, _event_handler(hass, entry, runtime))
     entry.async_on_unload(unsub)
+    # Event entities (buttons, remotes) fire "event"-type bus messages instead
+    # of state changes — listen for them so presses reach the feed, Record,
+    # the detection engine and the analysis digest.
+    unsub_events = hass.bus.async_listen("event", _event_bus_handler(hass, entry, runtime))
+    entry.async_on_unload(unsub_events)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     behaviour_id_schema = vol.Schema({vol.Required(ATTR_BEHAVIOUR_ID): str})
@@ -443,13 +483,18 @@ def _event_handler(
     """Translate state_changed events into Observations for the engine."""
     from homeassistant.core import callback  # function-local: purity guard
 
-    engine = runtime.engine
-
     @callback
     def handle_event(event: Event) -> None:
         new_state = event.data.get("new_state")
         entity_id = event.data["entity_id"]
         if new_state is None:  # entity removed
+            return
+        if entity_id.startswith("event."):
+            # Event entities do mirror their last event type as state, but
+            # repeat firings of the same type write no state row at all:
+            # the "event"-bus listener owns that domain (see
+            # _event_bus_handler), so handling state rows here would both
+            # double and thin the press history.
             return
         old_state = event.data.get("old_state")
         if old_state is not None and old_state.state == new_state.state:
@@ -476,40 +521,114 @@ def _event_handler(
             # unobserved entities must never reach the detection engine.
             _capture_recording(hass, runtime, "action", observation)
             return
-        if not engine.involves(entity_id):
-            return  # no sequence involves this entity: nothing can change
-        before = {bid: b.occurrences for bid, b in engine.behaviours.items()}
-        for detection in engine.observe(observation):
-            trail = " → ".join(f"{o.entity_id}={o.new_state}" for o in detection.matched)
-            _LOGGER.info(
-                "Detected %s (confidence %.0f%%): %s",
-                detection.behaviour.name,
-                detection.behaviour.confidence * 100,
-                trail,
-            )
-            runtime.last_detections[detection.behaviour.id] = {
-                "at": detection.matched[-1].timestamp.isoformat(),
-                "observations": [obs.to_dict() for obs in detection.matched],
-            }
-
-        newly_matched = [
-            engine.behaviours[bid]
-            for bid, count in before.items()
-            if engine.behaviours[bid].occurrences > count
-        ]
-        if newly_matched:
-            # The engine tallies occurrences for every status (including
-            # matches suppressed by cooldown); persist whenever counters moved.
-            runtime.schedule_save(hass)
-            for behaviour in newly_matched:
-                if (
-                    behaviour.status is BehaviourStatus.CANDIDATE
-                    and behaviour.id not in runtime.suggested
-                ):
-                    runtime.suggested.add(behaviour.id)
-                    hass.async_create_task(_notify_suggestion(hass, entry, behaviour))
+        _advance_engine(hass, entry, runtime, observation)
 
     return handle_event
+
+
+def _advance_engine(
+    hass: HomeAssistant, entry: ConfigEntry, runtime: Phil9000Runtime, observation: Observation
+) -> None:
+    """Feed one observation to the engine; persist and notify on new matches.
+
+    Shared by state changes and event-entity firings (buttons, remotes): the
+    detection side does not care whether the input was a state transition or
+    a press.
+    """
+    engine = runtime.engine
+    if not engine.involves(observation.entity_id):
+        return  # no sequence involves this entity: nothing can change
+    before = {bid: b.occurrences for bid, b in engine.behaviours.items()}
+    for detection in engine.observe(observation):
+        trail = " → ".join(f"{o.entity_id}={o.new_state}" for o in detection.matched)
+        _LOGGER.info(
+            "Detected %s (confidence %.0f%%): %s",
+            detection.behaviour.name,
+            detection.behaviour.confidence * 100,
+            trail,
+        )
+        runtime.last_detections[detection.behaviour.id] = {
+            "at": detection.matched[-1].timestamp.isoformat(),
+            "observations": [obs.to_dict() for obs in detection.matched],
+        }
+
+    newly_matched = [
+        engine.behaviours[bid]
+        for bid, count in before.items()
+        if engine.behaviours[bid].occurrences > count
+    ]
+    if newly_matched:
+        # The engine tallies occurrences for every status (including
+        # matches suppressed by cooldown); persist whenever counters moved.
+        runtime.schedule_save(hass)
+        for behaviour in newly_matched:
+            if (
+                behaviour.status is BehaviourStatus.CANDIDATE
+                and behaviour.id not in runtime.suggested
+            ):
+                runtime.suggested.add(behaviour.id)
+                hass.async_create_task(_notify_suggestion(hass, entry, behaviour))
+
+
+def _event_bus_handler(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    runtime: Phil9000Runtime,
+):  # noqa: ANN202
+    """Translate event-entity firings (buttons, remotes) into Observations.
+
+    HA's event-entity contract fires a bus event of type "event" carrying
+    ``{entity_id, event_type}`` — the press never touches the state machine,
+    so this listener is the only way PHIL9000 can see it. Rows go to the
+    ring buffer (history), the live feed, recording capture and the engine,
+    with ``new_state = event_type`` (single/double/toggle/…).
+    """
+    from homeassistant.core import callback  # function-local: purity guard
+
+    @callback
+    def handle_event(event: Event) -> None:
+        if event.event_type != "event":
+            return  # everything else on the bus is not an event-entity firing
+        data = event.data or {}
+        entity_id = data.get("entity_id")
+        event_name = data.get("event_type")
+        if not isinstance(entity_id, str) or not isinstance(event_name, str) or not event_name:
+            return
+        if not runtime.subscriptions.matches(entity_id, runtime.is_noise):
+            return
+        observation = Observation(
+            entity_id=entity_id,
+            new_state=event_name,
+            old_state=None,  # an event has no previous state
+            timestamp=event.time_fired,
+        )
+        row = {
+            "entity_id": entity_id,
+            "at": observation.timestamp.isoformat(),
+            "old_state": None,
+            "new_state": event_name,
+            "event": True,
+        }
+        runtime.event_rows.append(row)
+        del runtime.event_rows[:-EVENT_RING_LIMIT]
+        runtime.schedule_event_save(hass)
+        _push_activity_row(runtime, row)
+        if runtime.recording.mode is not None:
+            # Presses are always real activity: skip the state-transition
+            # noise rules (there is no previous state to compare against).
+            _capture_recording(hass, runtime, runtime.recording.mode, observation, skip_noise=True)
+        _advance_engine(hass, entry, runtime, observation)
+
+    return handle_event
+
+
+def _push_activity_row(runtime: Phil9000Runtime, row: dict) -> None:
+    """Push one feed row to live activity subscribers (best effort)."""
+    for subscriber in list(runtime.activity_subscribers):
+        try:
+            subscriber(row)
+        except Exception:  # noqa: BLE001 — a stale connection must not break observing
+            _LOGGER.debug("PHIL9000 activity subscriber failed", exc_info=True)
 
 
 def _publish_activity(runtime: Phil9000Runtime, observation: Observation) -> None:
@@ -518,24 +637,33 @@ def _publish_activity(runtime: Phil9000Runtime, observation: Observation) -> Non
         return
     if is_feed_noise({"old_state": observation.old_state, "new_state": observation.new_state}):
         return  # availability bookkeeping or no known previous state
-    row = {
-        "entity_id": observation.entity_id,
-        "at": observation.timestamp.isoformat(),
-        "old_state": observation.old_state,
-        "new_state": observation.new_state,
-    }
-    for subscriber in list(runtime.activity_subscribers):
-        try:
-            subscriber(row)
-        except Exception:  # noqa: BLE001 — a stale connection must not break observing
-            _LOGGER.debug("PHIL9000 activity subscriber failed", exc_info=True)
+    _push_activity_row(
+        runtime,
+        {
+            "entity_id": observation.entity_id,
+            "at": observation.timestamp.isoformat(),
+            "old_state": observation.old_state,
+            "new_state": observation.new_state,
+        },
+    )
 
 
 def _capture_recording(
-    hass: HomeAssistant, runtime: Phil9000Runtime, kind: str, observation: Observation
+    hass: HomeAssistant,
+    runtime: Phil9000Runtime,
+    kind: str,
+    observation: Observation,
+    *,
+    skip_noise: bool = False,
 ) -> None:
-    """Append a live state change to the recording session (user-paced, saved now)."""
-    if is_feed_noise({"old_state": observation.old_state, "new_state": observation.new_state}):
+    """Append a live state change (or event firing) to the recording session.
+
+    Saved immediately with the push: a crash mid-demonstration must not
+    lose what the user deliberately showed it.
+    """
+    if not skip_noise and is_feed_noise(
+        {"old_state": observation.old_state, "new_state": observation.new_state}
+    ):
         # Availability bookkeeping — and HA's startup restore of every known
         # entity (a restored switch writing "off", a first-seen entity's
         # "None -> state") — is never a demonstration: with recording armed
