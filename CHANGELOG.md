@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.0 — 2026-11-28
+
+### AI task agents: the recommended route to the LLM
+
+- PHIL9000's agent option now accepts an **AI task entity** (`ai_task.*`),
+  Home Assistant's purpose-built route for "LLM returns structured data".
+  The reply arrives validated against a JSON schema describing the exact
+  proposal contract (updates with ids, new patterns with 2+ steps, weekday
+  and time windows) — no voice-assistant system prompt, tool set or word
+  limit can silently mangle it, and PHIL9000's own guardrails still run on
+  whatever comes back.
+- Why this route exists: a real install spent months reporting "no new
+  convincing patterns" because its conversation agent was the household's
+  **voice assistant** — a one-sentence-plain-text system prompt and a
+  500-token cap. The model produced the right JSON and had it truncated
+  mid-object every single run.
+- Conversation agents keep working as the fallback (blank = the default
+  conversation agent), and all the v0.6.1 failure visibility applies to
+  both routes.
+
 ## v0.6.1 — 2026-11-28
 
 ### Analysis runs fail loudly instead of pretending nothing was found

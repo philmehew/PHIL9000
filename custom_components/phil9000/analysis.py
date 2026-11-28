@@ -186,11 +186,23 @@ def _dig(data: object, *keys: str) -> Any:
 
 
 async def async_call_agent(hass: HomeAssistant, agent_id: str | None, prompt: str) -> str:
-    """Ask the household's conversation agent (no API keys of our own).
+    """Ask the household's LLM agent (no API keys of our own).
+
+    Two routes, picked by the configured agent's domain:
+
+    - ``ai_task.*`` — HA's purpose-built structured-data route. The reply
+      is validated against ANALYSIS_REPLY_SCHEMA by Home Assistant before
+      PHIL9000 sees it, and no voice-assistant system prompt, tool set or
+      word limit stands between the analysis and its JSON (a real install
+      spent months silently losing results to a conversation agent whose
+      instructions demanded one-sentence plain-text replies).
+    - ``conversation.*`` (or blank) — the household conversation agent.
 
     Bounded: a hung agent call would otherwise hold the in-flight guard
     (and block every later run) until Home Assistant restarts.
     """
+    if agent_id and agent_id.startswith("ai_task."):
+        return await _async_call_ai_task_agent(hass, agent_id, prompt)
     payload: dict[str, Any] = {"text": prompt}
     if agent_id:
         payload["agent_id"] = agent_id
@@ -205,6 +217,41 @@ async def async_call_agent(hass: HomeAssistant, agent_id: str | None, prompt: st
         ) from None
     # response shape: {"response": {"speech": {"plain": {"speech": "..."}}}}
     return str(_dig(response, "response", "speech", "plain", "speech") or "")
+
+
+async def _async_call_ai_task_agent(hass: HomeAssistant, agent_id: str, prompt: str) -> str:
+    """Run the analysis as an ai_task data-generation task."""
+    import json
+
+    from homeassistant.components import ai_task  # function-local: purity guard
+    from probatio import from_json_schema
+
+    from .analyser import ANALYSIS_REPLY_SCHEMA
+
+    try:
+        async with asyncio.timeout(AGENT_TIMEOUT_SECONDS):
+            result = await ai_task.async_generate_data(
+                hass,
+                task_name="PHIL9000 pattern analysis",
+                entity_id=agent_id,
+                instructions=prompt,
+                structure=from_json_schema(ANALYSIS_REPLY_SCHEMA),
+            )
+    except TimeoutError:
+        raise AnalysisUnavailableError(
+            f"AI task agent call timed out after {AGENT_TIMEOUT_SECONDS // 60} minutes"
+        ) from None
+    except AnalysisUnavailableError:
+        raise
+    except Exception as err:  # noqa: BLE001 — surface as a friendly service error
+        raise AnalysisUnavailableError(f"AI task agent call failed: {err}") from err
+    data = result.data
+    if not isinstance(data, dict):
+        raise AnalysisUnavailableError(
+            f"the AI task agent returned {type(data).__name__} instead of structured data — "
+            "check the agent's model and max-tokens settings"
+        )
+    return json.dumps(data)
 
 
 def _expand_specs(hass: HomeAssistant, specs: list[str], exclude: list[str]) -> list[str]:

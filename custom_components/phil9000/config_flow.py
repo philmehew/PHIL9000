@@ -118,7 +118,7 @@ class Phil9000OptionsFlow(OptionsFlow):
                 vol.Optional(
                     OPTION_AGENT_ID,
                     default=current.get(OPTION_AGENT_ID) or vol.UNDEFINED,
-                ): EntitySelector(EntitySelectorConfig(domain="conversation")),
+                ): EntitySelector(EntitySelectorConfig(domain=["conversation", "ai_task"])),
                 vol.Optional(
                     OPTION_CUSTOM_PROMPT,
                     default=values.get(OPTION_CUSTOM_PROMPT) or PROMPT_TEMPLATE,

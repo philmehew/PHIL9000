@@ -212,6 +212,55 @@ async def test_run_analysis_fails_loudly_on_empty_llm_output(
         )
 
 
+# -- the ai_task agent route ------------------------------------------------------
+
+
+async def test_ai_task_agent_is_routed_and_parsed(hass: HomeAssistant, monkeypatch) -> None:
+    """An ai_task.* agent goes through the structured-data route.
+
+    The seam is stubbed (probatio/ai_task are HA-runtime deps); the routing
+    and the handoff into the standard reply parser are what's under test.
+    """
+    from custom_components.phil9000 import analysis
+
+    calls: list[tuple[str, str]] = []
+
+    async def fake_ai_task(hass, agent_id, prompt):  # noqa: ANN001, ARG001
+        calls.append((agent_id, prompt))
+        return json.dumps(
+            {
+                "updates": [],
+                "new": [
+                    {
+                        "name": "Evening handoff",
+                        "description": "Office off then kitchen on.",
+                        "steps": [
+                            {"entity_id": OFFICE, "to_state": "off"},
+                            {"entity_id": KITCHEN, "to_state": "on"},
+                        ],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(analysis, "_async_call_ai_task_agent", fake_ai_task)
+    reply = await analysis.async_call_agent(hass, "ai_task.strix_halo", "PROMPT")
+    assert calls == [("ai_task.strix_halo", "PROMPT")]
+    result = analysis.parse_analysis_reply(reply, existing=[])
+    assert [b.name for b in result.new] == ["Evening handoff"]
+
+
+async def test_ai_task_agent_error_maps_to_unavailable(hass: HomeAssistant, monkeypatch) -> None:
+    from custom_components.phil9000 import analysis
+
+    async def failing(hass, agent_id, prompt):  # noqa: ANN001, ARG001
+        raise analysis.AnalysisUnavailableError("AI task agent call failed: boom")
+
+    monkeypatch.setattr(analysis, "_async_call_ai_task_agent", failing)
+    with pytest.raises(AnalysisUnavailableError, match="boom"):
+        await analysis.async_call_agent(hass, "ai_task.strix_halo", "PROMPT")
+
+
 async def test_run_analysis_service_reports_unavailable_recorder(
     hass: HomeAssistant,
 ) -> None:

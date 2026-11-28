@@ -99,6 +99,37 @@ def test_summarise_drops_constant_state_spam_but_keeps_rare_markers():
     assert "on@17:32" in summary
 
 
+def test_reply_schema_matches_the_parser_contract():
+    # The schema drives HA's ai_task structured output, so it must describe
+    # exactly what parse_analysis_reply accepts: "updates" items carry an id,
+    # "new" items don't, steps need entity_id and to_state, and the whole
+    # reply needs both lists.
+    from custom_components.phil9000.analyser import ANALYSIS_REPLY_SCHEMA
+
+    assert ANALYSIS_REPLY_SCHEMA["required"] == ["updates", "new"]
+    props = ANALYSIS_REPLY_SCHEMA["properties"]
+    assert set(props) == {"updates", "new"}
+    update_item = props["updates"]["items"]
+    new_item = props["new"]["items"]
+    assert "id" in update_item["required"] and "id" not in new_item["required"]
+    for item in (update_item, new_item):
+        assert item["required"] == [
+            *[k for k in ("id",) if k in item["required"]],
+            "name",
+            "description",
+            "steps",
+        ]
+        step = item["properties"]["steps"]["items"]
+        assert step["required"] == ["entity_id", "to_state"]
+        gap = step["properties"]["max_gap_seconds"]
+        assert gap["minimum"] == 5 and gap["maximum"] == 86400
+    # Steps need at least 2 entries — the same rule the parser enforces.
+    assert new_item["properties"]["steps"]["minItems"] == 2
+    # Weekday bounds mirror the parser's 1..7 ISO days.
+    days = new_item["properties"]["weekdays"]["items"]
+    assert days["minimum"] == 1 and days["maximum"] == 7
+
+
 # -- prompt --------------------------------------------------------------------
 
 

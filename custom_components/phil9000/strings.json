@@ -22,7 +22,7 @@
         "title": "PHIL9000 settings",
         "description": "Analysis and notify settings. What PHIL9000 observes is managed in its panel.",
         "data": {
-          "agent_id": "Conversation agent for pattern analysis (blank = default agent)",
+          "agent_id": "Agent for pattern analysis — pick an AI task entity (recommended) or a conversation agent (blank = default conversation agent)",
           "notify_entity": "Notify entity for suggestions (blank = none)",
           "cooldown_default": "Default cooldown between detections (seconds)",
           "analysis_enabled": "Run nightly pattern analysis (optional, off by default)",

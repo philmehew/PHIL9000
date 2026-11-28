@@ -20,6 +20,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
+from typing import Any
 
 from .models import Behaviour, BehaviourStatus, BehaviourStep
 
@@ -30,6 +31,78 @@ MAX_EVENTS_PER_ENTITY = 60
 # local LLM servers reject or starve of output budget. When the digest at the
 # full per-entity cap exceeds this, the cap is halved until it fits.
 SUMMARY_CHAR_BUDGET = 100_000
+
+
+def _reply_item_schema(*, with_id: bool) -> dict[str, Any]:
+    """JSON Schema for one "updates" or "new" element of the LLM's reply.
+
+    Only keywords probatio's ``from_json_schema`` honours are used, so the
+    same document drives HA's ai_task structured output (which validates the
+    reply before PHIL9000 sees it) and documents the contract. Descriptions
+    are descriptive only — they help models that render the schema.
+    """
+    properties: dict[str, Any] = {}
+    if with_id:
+        properties["id"] = {
+            "type": "string",
+            "description": "the existing candidate's id, exactly as given",
+        }
+    properties.update(
+        {
+            "name": {"type": "string", "minLength": 1, "description": "short human name"},
+            "description": {
+                "type": "string",
+                "description": "one sentence of what the person seems to be doing",
+            },
+            "steps": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "description": "entity id from the history, e.g. light.porch_light",
+                        },
+                        "to_state": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "the state the entity changes to",
+                        },
+                        "max_gap_seconds": {
+                            "type": "integer",
+                            "minimum": 5,
+                            "maximum": 86400,
+                            "description": "typical maximum gap after the previous step",
+                        },
+                    },
+                    "required": ["entity_id", "to_state"],
+                },
+            },
+            "weekdays": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 1, "maximum": 7},
+                "description": (
+                    "ISO weekday numbers (1=Mon..7=Sun) if the pattern only occurs on some days"
+                ),
+            },
+            "time_start": {"type": "string", "description": "HH:MM UTC window start"},
+            "time_end": {"type": "string", "description": "HH:MM UTC window end"},
+        }
+    )
+    required = (["id"] if with_id else []) + ["name", "description", "steps"]
+    return {"type": "object", "properties": properties, "required": required}
+
+
+ANALYSIS_REPLY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "updates": {"type": "array", "items": _reply_item_schema(with_id=True)},
+        "new": {"type": "array", "items": _reply_item_schema(with_id=False)},
+    },
+    "required": ["updates", "new"],
+}
 MAX_PROPOSALS_PER_RUN = 5
 MAX_UPDATES_PER_RUN = 5
 PROPOSAL_PREFIX = "llm-"
