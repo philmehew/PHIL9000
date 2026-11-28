@@ -107,6 +107,13 @@ const STYLE = `
              border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
     .note { background: rgba(25,118,210,.10); color: #1976d2; padding: 10px 14px;
             border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+    .warn { background: rgba(230,126,34,.12); color: #e67e22; padding: 10px 14px;
+            border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+    .running { background: rgba(96,125,139,.12); color: #607d8b; padding: 10px 14px;
+               border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+    .running::before { content: "◌ "; display: inline-block;
+               animation: phil-spin 1.2s linear infinite; }
+    @keyframes phil-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .section { font-size: 14px; font-weight: 500; margin: 18px 0 8px;
                color: var(--secondary-text-color); text-transform: uppercase;
                letter-spacing: .05em; }
@@ -135,9 +142,6 @@ const STYLE = `
     .section-head button { font-size: 12px; padding: 3px 12px; }
     .section-head input { font-size: 12px; padding: 3px 8px; width: 230px;
       margin-right: -4px; }
-    .feed-status { font-size: 12px; color: var(--secondary-text-color);
-                   margin-left: auto; text-align: right; }
-    .feed-status.error { color: var(--error-color, #db4437); }
     .top-grid { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
     #activity-col { flex: 3 1 430px; min-width: 320px; }
     #manage-col { flex: 2 1 340px; min-width: 300px; }
@@ -193,11 +197,11 @@ class Phil9000Panel extends HTMLElement {
     this._activity = [];
     this._activityFilter = ""; // live filter over the loaded feed rows
     this._activityHint = "";
-    this._fetchInfo = null; // last recorder fetch result: row count, window
     this._paused = false; // live rows buffer while the user inspects the feed
     this._pending = [];
     this._analysing = false;
     this._analysisNote = null;
+    this._noteKind = "note"; // banner class for the note: "note" or "warn"
     this._analysisLog = null; // entries from phil9000/analysis_log (newest first)
     this._monitoring = null;
     this._entityFilter = "";
@@ -212,8 +216,7 @@ class Phil9000Panel extends HTMLElement {
         <div id="activity-col">
           <div class="section-head"><h2 class="section">Recent activity</h2>
             <input class="activity-search" type="search" placeholder="Filter — entity or state…" />
-            <button class="secondary" data-act="pause">Pause</button>
-            <span class="feed-status" id="feed-status"></span></div>
+            <button class="secondary" data-act="pause">Pause</button></div>
           <div id="activity"><div class="card"><ul class="act-list">
             <li class="empty">Loading…</li>
           </ul></div></div>
@@ -300,7 +303,13 @@ class Phil9000Panel extends HTMLElement {
       hass.connection.subscribeMessage(
         (entry) => {
           this._analysisLog = [entry, ...(this._analysisLog || [])].slice(0, 50);
+          // Every entry carries the post-event run state, so a run started
+          // elsewhere (service, nightly, another tab) disables the button and
+          // shows the running status here too.
+          this._analysing = !!entry.running;
           this._renderAnalysisLog();
+          this._renderBanner();
+          this._updateAnalyseBtn();
         },
         { type: "phil9000/subscribe_analysis_log" },
       ),
@@ -326,17 +335,8 @@ class Phil9000Panel extends HTMLElement {
       });
       fetched = result.items || [];
       this._activityHint = result.hint || "";
-      this._fetchInfo = {
-        count: fetched.length,
-        observed: result.observed,
-        entities: result.observed_entities,
-        hours: result.window_hours,
-        limit: result.limit,
-        error: "",
-      };
     } catch (err) {
       this._activityHint = err.message || String(err);
-      this._fetchInfo = { error: this._activityHint };
     }
     if (replace) {
       // The observed set just changed (domains/entities): show exactly the
@@ -346,7 +346,6 @@ class Phil9000Panel extends HTMLElement {
       this._pending = [];
       this._updatePauseBtn();
       this._renderActivity();
-      this._renderFeedStatus();
       return;
     }
     // Rows pushed live since subscribing may not be committed to the
@@ -360,26 +359,6 @@ class Phil9000Panel extends HTMLElement {
       .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
       .slice(0, FEED_MAX);
     this._renderActivity();
-    this._renderFeedStatus();
-  }
-
-  _renderFeedStatus() {
-    const el = this.shadow.querySelector("#feed-status");
-    if (!el || !this._fetchInfo) return;
-    const info = this._fetchInfo;
-    if (info.error) {
-      el.classList.add("error");
-      el.textContent = `history query failed: ${info.error}`;
-      return;
-    }
-    el.classList.remove("error");
-    const win =
-      info.hours >= 24 ? `${Math.round(info.hours / 24)}d` : `${info.hours}h`;
-    let text =
-      `history: ${info.count} of ${info.observed} observed entities, ` +
-      `last ${win} (cap ${info.limit})`;
-    if (info.entities && info.entities.length) text += ` · ${info.entities.join(", ")}`;
-    el.textContent = text;
   }
 
   _renderActivity() {
@@ -431,10 +410,15 @@ class Phil9000Panel extends HTMLElement {
         type: "phil9000/analysis_log",
       });
       this._analysisLog = result.entries || [];
+      // A run already in flight (service/nightly/another tab) shows its
+      // status from the moment the panel opens.
+      this._analysing = !!result.running;
     } catch (err) {
       this._analysisLog = [];
     }
     this._renderAnalysisLog();
+    this._renderBanner();
+    this._updateAnalyseBtn();
   }
 
   _renderAnalysisLog() {
@@ -592,11 +576,23 @@ class Phil9000Panel extends HTMLElement {
       const parts = [];
       if (res.refined && res.refined.length) parts.push(`Refined: ${res.refined.join(", ")}`);
       if (res.new && res.new.length) parts.push(`New: ${res.new.join(", ")}`);
+      this._noteKind = "note";
       this._analysisNote = parts.length
         ? parts.join(" · ")
         : "No new convincing patterns this time.";
     } catch (err) {
-      this._analysisNote = `Analysis failed: ${err.message || String(err)}`;
+      const msg = err.message || String(err);
+      if (msg.includes("already in progress")) {
+        // A skip is not an outcome: say so plainly and in a distinct colour,
+        // pointing at the run that IS going.
+        this._noteKind = "warn";
+        this._analysisNote =
+          "Skipped — another analysis run is already in progress; " +
+          "watch the Analysis log below for its result.";
+      } else {
+        this._noteKind = "note";
+        this._analysisNote = `Analysis failed: ${msg}`;
+      }
     }
     this._analysing = false;
     await this._refresh();
@@ -728,11 +724,29 @@ class Phil9000Panel extends HTMLElement {
     return undefined;
   }
 
-  _render() {
+  // Banner: errors (red), the live run status (grey, spinner), and the note
+  // from the last analysis (blue) or a skip warning (amber). The running line
+  // appears whether the run was started here or elsewhere.
+  _renderBanner() {
     const banner = this.shadow.querySelector("#banner");
+    if (!banner) return;
     banner.innerHTML =
       (this._error ? `<div class="error">${esc(this._error)}</div>` : "") +
-      (this._analysisNote ? `<div class="note">${esc(this._analysisNote)}</div>` : "");
+      (this._analysing
+        ? `<div class="running">Analysis running… progress appears in the Analysis log below.</div>`
+        : "") +
+      (this._analysisNote
+        ? `<div class="${this._noteKind === "warn" ? "warn" : "note"}">${esc(this._analysisNote)}</div>`
+        : "");
+  }
+
+  _updateAnalyseBtn() {
+    const btn = this.shadow.querySelector('[data-act="analyse"]');
+    if (btn) btn.disabled = this._analysing || this._busy || this._readOnly;
+  }
+
+  _render() {
+    this._renderBanner();
     const analyseBtn = this.shadow.querySelector('[data-act="analyse"]');
     if (analyseBtn) analyseBtn.disabled = this._analysing || this._busy || this._readOnly;
     const meta = this.shadow.querySelector(".meta");

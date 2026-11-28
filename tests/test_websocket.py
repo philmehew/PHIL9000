@@ -301,6 +301,7 @@ async def test_analysis_log_ws_fetch_and_live_push(hass: HomeAssistant, hass_ws_
 
     out = await _send(client, 1, {"type": "phil9000/analysis_log"})
     assert out["success"] is True and out["result"]["entries"] == []
+    assert out["result"]["running"] is False  # panel's on-open run status
 
     await client.send_json({"id": 2, "type": "phil9000/subscribe_analysis_log"})
     assert (await client.receive_json())["success"] is True

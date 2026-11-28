@@ -222,10 +222,19 @@ def _log_run(runtime: Phil9000Runtime, level: str, message: str) -> None:
     Entries newest-last, capped at ANALYSIS_LOG_LIMIT. The file write happens
     once per run (see async_run_analysis) — a run is rare and short, and a
     single awaited save avoids racing executor writes over the file.
+
+    Each entry carries ``running`` — whether a run is still in flight after
+    this event — so the panel can show/hide its "Analysis running…" status
+    from the live pushes alone.
     """
     line = "PHIL9000 analysis: %s"
     (_LOGGER.error if level == "error" else _LOGGER.info)(line, message)
-    entry = {"at": datetime.now(UTC).isoformat(), "level": level, "message": message}
+    entry = {
+        "at": datetime.now(UTC).isoformat(),
+        "level": level,
+        "message": message,
+        "running": runtime.analysis_running,
+    }
     runtime.analysis_log.append(entry)
     del runtime.analysis_log[:-ANALYSIS_LOG_LIMIT]
     for subscriber in list(runtime.analysis_log_subscribers):
@@ -277,9 +286,14 @@ async def async_run_analysis(
                 hass, entry, runtime, history_provider, agent_call, notify
             )
         except AnalysisUnavailableError as err:
+            # Terminal lines log the post-event state, so the "Finished"/"Run
+            # failed" entries carry running=False (the finally below re-clears
+            # idempotently).
+            runtime.analysis_running = False
             _log_run(runtime, "error", f"Run failed: {err}")
             raise
         except Exception as err:  # noqa: BLE001 — log, then let HA surface it
+            runtime.analysis_running = False
             _log_run(runtime, "error", f"Run failed: {type(err).__name__}: {err}")
             raise
         details: list[str] = []
@@ -288,6 +302,7 @@ async def async_run_analysis(
         if summary["new"]:
             details.append(f"proposed {', '.join(summary['new'])}")
         outcome = "; ".join(details) if details else "no new convincing patterns"
+        runtime.analysis_running = False
         _log_run(runtime, "info", f"Finished in {time.monotonic() - started:.0f}s — {outcome}")
         return summary
     finally:

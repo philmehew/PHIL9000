@@ -224,10 +224,18 @@ def async_setup(hass: HomeAssistant) -> None:
     async def handle_analysis_log(
         hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
     ) -> None:
-        """Recent LLM analysis runs, newest first (the panel's Analysis log)."""
+        """Recent LLM analysis runs, newest first (the panel's Analysis log).
+
+        ``running`` tells the panel whether a run is in flight right now (e.g.
+        started from another tab, the service or the nightly job), so it can
+        show its "Analysis running…" status on open.
+        """
         if (runtime := _require(hass, connection, msg)) is None:
             return
-        connection.send_result(msg["id"], {"entries": list(reversed(runtime.analysis_log))})
+        connection.send_result(
+            msg["id"],
+            {"entries": list(reversed(runtime.analysis_log)), "running": runtime.analysis_running},
+        )
 
     @websocket_api.websocket_command({"type": "phil9000/subscribe_analysis_log"})
     @websocket_api.async_response

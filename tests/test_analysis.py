@@ -282,9 +282,15 @@ async def test_analysis_log_records_a_readable_run(hass: HomeAssistant) -> None:
     assert "proposed Evening handoff" in messages[-1]
     assert all(e["level"] == "info" for e in runtime.analysis_log)
     datetime.fromisoformat(runtime.analysis_log[-1]["at"])  # panel-parsable stamp
+    # Entries carry the post-event run state: in flight from "Run started"
+    # until "Finished", done after it (the panel's running status keys on it).
+    assert runtime.analysis_log[0]["running"] is True
+    assert all(e["running"] is True for e in runtime.analysis_log[:-1])
+    assert runtime.analysis_log[-1]["running"] is False
 
     # Live push mirrors the buffer (start, progress, finish).
     assert [e["message"] for e in pushes] == messages
+    assert all("running" in e for e in pushes)
 
 
 async def test_analysis_log_records_failures_as_errors(hass: HomeAssistant) -> None:
@@ -311,6 +317,7 @@ async def test_analysis_log_records_failures_as_errors(hass: HomeAssistant) -> N
     last = runtime.analysis_log[-1]
     assert last["level"] == "error"
     assert "no recorded history" in last["message"]
+    assert last["running"] is False  # terminal lines say the run is over
     assert not runtime.analysis_running  # failed runs leave no stale guard
 
 
