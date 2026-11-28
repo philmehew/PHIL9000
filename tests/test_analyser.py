@@ -7,7 +7,7 @@ can only ever produce inert, schema-valid CANDIDATE behaviours.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 
 from custom_components.phil9000.analyser import (
     MAX_PROPOSALS_PER_RUN,
@@ -59,7 +59,44 @@ def test_summarise_lists_entities_days_and_states():
 def test_summarise_caps_long_histories():
     events = {"sensor.x": [(datetime(2026, 1, 1, tzinfo=UTC), str(i)) for i in range(300)]}
     summary = summarise_history(events)
-    assert "(+60 earlier events)" in summary
+    assert "(+240 earlier events)" in summary  # cap is 60, most recent kept
+
+
+def test_summarise_shrinks_to_fit_the_char_budget():
+    # A pathological window (many entities, all flapping) must not produce a
+    # prompt the LLM will choke on: the per-entity cap halves until the
+    # digest fits SUMMARY_CHAR_BUDGET.
+    from custom_components.phil9000.analyser import SUMMARY_CHAR_BUDGET
+
+    events = {
+        f"sensor.s{i}": [
+            (datetime(2026, 11, 1, tzinfo=UTC) + timedelta(hours=h), str(h % 2)) for h in range(200)
+        ]
+        for i in range(50)
+    }
+    summary = summarise_history(events)
+    assert len(summary) <= SUMMARY_CHAR_BUDGET
+    assert "(+earlier" not in summary  # truncation notes say how much was cut
+    assert "(+" in summary
+
+
+def test_summarise_drops_constant_state_spam_but_keeps_rare_markers():
+    # A constant state repeated past the cap is refresh spam (a real week
+    # had one entity reporting 'off' 5,700 times) — but the same state a
+    # handful of times at distinct moments is a rhythm marker and stays.
+    spam = {
+        "light.spam": [(datetime(2026, 11, 2, hour=h % 24, tzinfo=UTC), "off") for h in range(80)],
+    }
+    assert "light.spam" not in summarise_history(spam)
+
+    marker = {
+        "binary_sensor.kitchen": [
+            (datetime(2026, 11, 20 + d, hour=17, minute=32, tzinfo=UTC), "on") for d in range(3)
+        ],
+    }
+    summary = summarise_history(marker)
+    assert "binary_sensor.kitchen" in summary
+    assert "on@17:32" in summary
 
 
 # -- prompt --------------------------------------------------------------------

@@ -24,7 +24,12 @@ from datetime import UTC, datetime, time
 from .models import Behaviour, BehaviourStatus, BehaviourStep
 
 DEFAULT_LOOKBACK_DAYS = 7
-MAX_EVENTS_PER_ENTITY = 240
+MAX_EVENTS_PER_ENTITY = 60
+# Hard ceiling on the summary text (~70k tokens). Oversized prompts are what
+# silently killed real-world runs: a whole-domain week was 225k tokens, which
+# local LLM servers reject or starve of output budget. When the digest at the
+# full per-entity cap exceeds this, the cap is halved until it fits.
+SUMMARY_CHAR_BUDGET = 100_000
 MAX_PROPOSALS_PER_RUN = 5
 MAX_UPDATES_PER_RUN = 5
 PROPOSAL_PREFIX = "llm-"
@@ -106,22 +111,51 @@ def summarise_history(
     Input: entity_id -> list of (timestamp, state) in chronological order.
     Output lines look like:
       binary_sensor.office_presence: Mon 2026-11-23 off@17:30, on@08:05 | ...
-    Each entity's digest is capped at MAX_EVENTS_PER_ENTITY (most recent kept).
+    Each entity's digest is capped at the per-entity event cap (most recent
+    kept). If the full digest exceeds SUMMARY_CHAR_BUDGET the cap is halved
+    until it fits, so a longer analysis window or more observed domains can
+    never produce a prompt the agent will choke on.
+
+    Entities that never left one state carry little pattern information, so
+    their digest is compressed to the last report per day (the daily timing
+    is the only signal they hold). A constant state repeated past the
+    per-entity cap is pure refresh spam (a real week had one entity
+    reporting 'off' 5,700 times) and is dropped outright. A handful of
+    same-state events at distinct times is still a rhythm marker and is
+    kept.
     """
-    lines: list[str] = []
-    for entity_id in sorted(events_by_entity):
-        events = events_by_entity[entity_id][-MAX_EVENTS_PER_ENTITY:]
-        truncated = len(events_by_entity[entity_id]) - len(events)
-        by_day: dict[str, list[str]] = {}
-        for moment, state in events:
-            local = moment.astimezone(UTC)
-            by_day.setdefault(local.strftime("%a %Y-%m-%d"), []).append(
-                f"{state}@{local.strftime('%H:%M')}"
-            )
-        day_parts = [f"{day} {', '.join(states)}" for day, states in sorted(by_day.items())]
-        if truncated > 0:
-            day_parts.insert(0, f"(+{truncated} earlier events)")
-        lines.append(f"{entity_id}: " + " | ".join(day_parts))
+
+    def build(cap: int) -> list[str]:
+        out: list[str] = []
+        for entity_id in sorted(events_by_entity):
+            all_events = events_by_entity[entity_id]
+            constant = len({state for _, state in all_events}) <= 1
+            if constant and len(all_events) > MAX_EVENTS_PER_ENTITY:
+                continue
+            if constant:
+                latest_by_day: dict[str, tuple[datetime, str]] = {}
+                for moment, state in all_events:
+                    latest_by_day[moment.astimezone(UTC).strftime("%a %Y-%m-%d")] = (moment, state)
+                all_events = [latest_by_day[day] for day in sorted(latest_by_day)]
+            events = all_events[-cap:]
+            truncated = len(all_events) - len(events)
+            by_day: dict[str, list[str]] = {}
+            for moment, state in events:
+                local = moment.astimezone(UTC)
+                by_day.setdefault(local.strftime("%a %Y-%m-%d"), []).append(
+                    f"{state}@{local.strftime('%H:%M')}"
+                )
+            day_parts = [f"{day} {', '.join(states)}" for day, states in sorted(by_day.items())]
+            if truncated > 0:
+                day_parts.insert(0, f"(+{truncated} earlier events)")
+            out.append(f"{entity_id}: " + " | ".join(day_parts))
+        return out
+
+    cap = MAX_EVENTS_PER_ENTITY
+    lines = build(cap)
+    while len("\n".join(lines)) > SUMMARY_CHAR_BUDGET and cap > 10:
+        cap = max(10, cap // 2)
+        lines = build(cap)
     return "\n".join(lines)
 
 
@@ -203,7 +237,7 @@ def parse_analysis_reply(text: str, existing: list[Behaviour] | None = None) -> 
     before. A legacy plain-array reply is treated as new-only. Malformed
     replies yield an empty result.
     """
-    payload = _extract_json(text)
+    payload = extract_reply_json(text)
     if isinstance(payload, list):
         payload = {"new": payload}
     if isinstance(payload, dict) and "new" not in payload and "updates" not in payload:
@@ -342,12 +376,15 @@ def _bracketed(text: str, opener: str) -> str | None:
     return text[start : end + 1]
 
 
-def _extract_json(text: str):
+def extract_reply_json(text: str):
     """Best-effort extraction of the reply JSON (object form or legacy array).
 
     Tries the whole text, then a fenced block, and inside each the array
     span before the object span (so a legacy ``[{...}]`` reply surrounded by
-    prose is not mistaken for a single object).
+    prose is not mistaken for a single object). Returns None when the reply
+    contains no JSON at all — the analysis pass treats that as an agent
+    failure rather than "nothing found" (a chatty or error reply means the
+    model or max-tokens settings are wrong, and that must be visible).
     """
     fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     candidates = [text.strip()]

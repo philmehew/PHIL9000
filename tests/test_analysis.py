@@ -170,19 +170,46 @@ async def test_in_flight_guard_resets_after_agent_failure(hass: HomeAssistant) -
     assert runtime.analysis_running is False
 
 
-async def test_run_analysis_survives_unparseable_llm_output(
+async def test_run_analysis_fails_loudly_on_unparseable_llm_output(
     hass: HomeAssistant,
 ) -> None:
+    """A non-JSON reply is an agent misconfiguration, not "nothing found".
+
+    The old behaviour — treat it as an empty result — hid a broken agent
+    (wrong model name on a local LLM server) behind "no new convincing
+    patterns" for weeks of runs.
+    """
     seed_behaviours(hass, end_of_work_day())
     entry = await setup_entry(hass)
     runtime = hass.data[DOMAIN][entry.entry_id]
 
     babbling = FakeAgent("I'm not sure, maybe something with the kitchen?")
-    summary = await async_run_analysis(
-        hass, entry, runtime, history_provider=_fake_history, agent_call=babbling
-    )
-    assert summary == {"refined": [], "new": []}
+    with pytest.raises(AnalysisUnavailableError) as excinfo:
+        await async_run_analysis(
+            hass, entry, runtime, history_provider=_fake_history, agent_call=babbling
+        )
+    assert "not JSON" in str(excinfo.value)
+    assert "I'm not sure" in str(excinfo.value)  # the evidence travels with the error
     assert len(reload_behaviours(hass)) == 1  # store untouched
+
+
+async def test_run_analysis_fails_loudly_on_empty_llm_output(
+    hass: HomeAssistant,
+) -> None:
+    # A reasoning model can burn its whole max-tokens budget on hidden
+    # thinking and produce no content at all — same visibility rules.
+    seed_behaviours(hass, end_of_work_day())
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+
+    with pytest.raises(AnalysisUnavailableError, match="empty reply"):
+        await async_run_analysis(
+            hass,
+            entry,
+            runtime,
+            history_provider=_fake_history,
+            agent_call=FakeAgent("   "),
+        )
 
 
 async def test_run_analysis_service_reports_unavailable_recorder(
@@ -273,7 +300,7 @@ async def test_analysis_log_records_a_readable_run(hass: HomeAssistant) -> None:
     assert any(m.startswith("Collected 3 state changes from 2 entities") for m in messages)
     # The user sees what's about to happen (and that waiting is normal)
     # before the slow LLM call starts.
-    sending = next(m for m in messages if m.startswith("Sending the summary to"))
+    sending = next(m for m in messages if m.startswith("Sending the summary ("))
     assert "can take a few minutes" in sending
     assert messages.index(sending) > messages.index(
         next(m for m in messages if m.startswith("Collected"))

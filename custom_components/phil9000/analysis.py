@@ -20,6 +20,7 @@ from .activity import DEFAULT_LIMIT, dedupe_activity
 from .analyser import (
     DEFAULT_LOOKBACK_DAYS,
     build_prompt,
+    extract_reply_json,
     parse_analysis_reply,
     summarise_history,
 )
@@ -349,13 +350,31 @@ async def _async_analysis_pass(
     _log_run(
         runtime,
         "info",
-        f"Sending the summary to {agent_id or 'the default conversation agent'} — "
+        f"Sending the summary ({len(prompt) // 1000}k chars) to "
+        f"{agent_id or 'the default conversation agent'} — "
         "LLM analysis can take a few minutes; results appear here when it replies",
     )
     try:
         reply = await call(hass, agent_id, prompt)
     except Exception as err:  # noqa: BLE001 — surface as a friendly service error
         raise AnalysisUnavailableError(f"conversation agent call failed: {err}") from err
+
+    # A reply that isn't JSON at all is an agent problem (wrong model,
+    # error speech, a reasoning model whose content was starved by a small
+    # max-tokens) — reporting it as "no new convincing patterns" hides the
+    # misconfiguration, so fail the run with the evidence instead.
+    if not reply.strip():
+        raise AnalysisUnavailableError(
+            "conversation agent returned an empty reply — check the agent's "
+            "model and max-tokens settings (a reasoning model can spend its "
+            "whole output budget on hidden thinking and leave no content)"
+        )
+    if extract_reply_json(reply) is None:
+        head = " ".join(reply.split())[:160]
+        raise AnalysisUnavailableError(
+            f"the conversation agent's reply was not JSON (starts: “{head}”) — "
+            "check the agent's model and max-tokens settings"
+        )
 
     result = parse_analysis_reply(reply, existing)
     if result.refined or result.new:

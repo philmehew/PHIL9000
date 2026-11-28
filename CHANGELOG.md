@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.6.1 — 2026-11-28
+
+### Analysis runs fail loudly instead of pretending nothing was found
+
+- Debugging a real install revealed the root cause of weeks of
+  "no new convincing patterns" replies: the agent entry had no model
+  configured, so the LLM server rejected every request instantly — and
+  PHIL9000 treated the agent's error reply as an empty result. A reply
+  that isn't JSON at all (an error message, chatty prose) or is empty
+  (a reasoning model spending its whole max-tokens budget on hidden
+  thinking) now fails the run with the evidence, e.g. *"the conversation
+  agent's reply was not JSON (starts: "Sorry, I couldn't…") — check the
+  agent's model and max-tokens settings"*.
+- The "Sending the summary…" log line now includes the prompt size for
+  easier diagnosis.
+
+### The summary now fits what LLMs actually accept
+
+- A whole-domain week (466 entities, 39k state changes) produced a
+  **225k-token** prompt — beyond what local LLM servers will serve, and
+  enough to starve any reasoning model's output budget. The digest is
+  now capped per entity at 60 events (most recent kept), constant-state
+  entities are compressed to their last report per day (a constant state
+  repeated past the cap — one real entity reported 'off' 5,700 times —
+  is dropped outright), and the whole summary self-compresses under a
+  100k-character budget. The same real week now yields ~68k tokens with
+  all rhythm-bearing entities intact.
+
 ## v0.6.0 — 2026-11-28
 
 ### Smarter, more creative pattern analysis
