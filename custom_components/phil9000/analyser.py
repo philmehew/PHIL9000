@@ -29,10 +29,12 @@ MAX_PROPOSALS_PER_RUN = 5
 MAX_UPDATES_PER_RUN = 5
 PROPOSAL_PREFIX = "llm-"
 
-PROMPT_TEMPLATE = """You analyse smart-home sensor history to find recurring household behaviour \
-patterns and to refine the patterns you already proposed.
+PROMPT_TEMPLATE = """You are a curious household-behaviour analyst. Below is a week of smart-home \
+state changes. Your job is to spot the human routines behind the data — not the \
+automations.
 
-History of entity state changes (timestamps are UTC):
+History of entity state changes (timestamps are UTC, one line per entity, days in \
+order):
 {summary}
 
 Current behaviours (JSON; "status" is the user's decision, not yours):
@@ -50,11 +52,37 @@ sharpen name/description). Each element must have:
 "new" — genuinely new recurring patterns not covered by any current behaviour.
 Each element must have:
   "name": short human name,
-  "description": one sentence of what you noticed,
+  "description": one sentence of what the PERSON seems to be doing,
   "steps": [{{"entity_id": "...", "to_state": "...", "max_gap_seconds": 300}}, ...],
 and optionally:
   "weekdays": ISO weekday numbers (1=Mon..7=Sun) if the pattern only occurs on some days,
   "time_start"/"time_end": "HH:MM" UTC window in which the first step usually occurs.
+
+Think like a detective studying this household:
+- Rhythms that repeat across days at similar times: waking, starting work, finishing
+  work, meals, TV or cinema sessions, bedtime. A change that recurs on 3+ days
+  within a roughly ±45-minute window is a routine worth proposing.
+- Room-to-room movement: audio following a person between speakers, lights trailing
+  them through the house, a work room going quiet as an evening room wakes up.
+- Sequences with human meaning, where steps tend to follow each other: work-session
+  markers ending, the same wind-down chain every night, morning getting-up clusters.
+- Weekday/weekend differences: later weekend wake times, different evening shapes —
+  use "weekdays" to say which days a pattern belongs to.
+- Steps don't have to be seconds apart. Set max_gap_seconds to the real rhythm
+  (e.g. 3600 for a slow wind-down over an hour); 300 is only the default.
+
+Ignore, because they are automations or noise rather than behaviour:
+- Sensor→light echoes (motion or presence switching lights within seconds) — the
+  house already automates those.
+- Entities that never change state, or repeat one state on a timer (e.g. a
+  thermostat reporting "auto" every 30 minutes, a floodlight on motion).
+- One-offs: a pattern must have recurred on multiple days before you propose it.
+
+Be creative but honest: prefer a plausible, well-argued proposal over silence —
+the user confirms or dismisses each candidate, so an interesting guess is valuable
+and an empty reply is not. Describe what the person is doing (e.g. "ends the work
+day in the garden office around 18:00: office audio stops, front-room lights come
+on shortly after"), not just which entities changed.
 
 Rules:
 - You may only update ids whose status is "candidate". NEVER put a confirmed
@@ -62,9 +90,8 @@ Rules:
   confirmed pattern has a genuinely different variant, propose it in "new".
 - Never re-propose or restate dismissed patterns.
 - A pattern needs 2 or more steps in a stable order; only use entities in the history.
-- max_gap_seconds is the typical maximum gap between consecutive steps (default 300).
-- At most {cap} updates and {cap} new patterns; return empty lists when there is
-  nothing convincing.
+- At most {cap} updates and {cap} new patterns; return empty lists only when the
+  history genuinely shows no recurring multi-day routine.
 """
 
 
