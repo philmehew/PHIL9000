@@ -33,6 +33,7 @@ from .const import (
     OPTION_CUSTOM_PROMPT,
 )
 from .notifier import async_notify
+from .recording import build_recording_prompt, parse_automation_reply
 from .subscriptions import Subscriptions, registry_is_noise
 
 if TYPE_CHECKING:
@@ -463,3 +464,91 @@ async def _async_analysis_pass(
 
 def _names(behaviours: list[Any]) -> str:
     return ", ".join(b.name for b in behaviours)
+
+
+# -- recording proposal (the Record flow's LLM step) --------------------------
+
+
+async def async_run_recording_pass(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    runtime: Phil9000Runtime,
+    *,
+    message: str | None = None,
+    agent_call: AgentCall | None = None,
+) -> dict[str, Any]:
+    """One LLM turn over the recorded demonstration.
+
+    ``message=None`` asks for a first proposal from the recorded triggers,
+    actions and notes; a message refines the existing proposal (the panel's
+    chat box). The validated proposal lands on the session, ready for
+    ``record_save``. Reuses the analysis single-flight guard and analysis log,
+    so proposal progress and guardrail drops are visible like nightly runs.
+    """
+    session = runtime.recording
+    if runtime.analysis_running:
+        raise AnalysisUnavailableError("a PHIL9000 LLM run is already in progress")
+    if not session.triggers:
+        raise AnalysisUnavailableError("record at least one trigger before asking for a proposal")
+    if not session.actions and not session.notes.strip():
+        raise AnalysisUnavailableError(
+            "record an action (or add notes describing one) before asking for a proposal"
+        )
+    if message is not None and session.proposal is None:
+        raise AnalysisUnavailableError("no proposal to refine yet — press Propose first")
+
+    runtime.analysis_running = True
+    started = time.monotonic()
+    kind = "refinement" if message is not None else "proposal"
+    if message is not None:
+        session.add_turn("user", message.strip())
+    _log_run(runtime, "info", f"Recording {kind} started")
+    try:
+        prompt = build_recording_prompt(
+            session, message=message, known=list(runtime.engine.behaviours.values())
+        )
+        agent_id = entry.options.get(OPTION_AGENT_ID)
+        call = agent_call or async_call_agent
+        try:
+            reply = await call(hass, agent_id, prompt)
+        except AnalysisUnavailableError:
+            raise
+        except Exception as err:  # noqa: BLE001 — surface as a friendly error
+            raise AnalysisUnavailableError(f"agent call failed: {err}") from err
+        result = parse_automation_reply(reply, session)
+        if result is None:
+            head = " ".join(reply.split())[:160]
+            raise AnalysisUnavailableError(
+                f"the agent reply was not JSON (starts: “{head}”) — check the agent's "
+                "model and max-tokens settings"
+            )
+        for what, why in result.dropped:
+            _log_run(runtime, "info", f"Recording {kind}: dropped {what}: {why}")
+        for warning in result.warnings:
+            _log_run(runtime, "info", f"Recording {kind}: {warning}")
+        if result.proposal is None:
+            raise AnalysisUnavailableError(
+                "the proposal used none of the recorded triggers — press Propose again"
+            )
+        session.proposal = result.proposal
+        session.add_turn("assistant", result.proposal.get("reply") or "Proposal updated.")
+        runtime.analysis_running = False
+        _log_run(
+            runtime,
+            "info",
+            f"Recording {kind} finished in {time.monotonic() - started:.0f}s — "
+            f"{result.proposal['name']}",
+        )
+        return dict(result.proposal)
+    except AnalysisUnavailableError as err:
+        runtime.analysis_running = False
+        _log_run(runtime, "error", f"Recording {kind} failed: {err}")
+        raise
+    except Exception as err:  # noqa: BLE001 — log, then let the caller surface it
+        runtime.analysis_running = False
+        _log_run(runtime, "error", f"Recording {kind} failed: {type(err).__name__}: {err}")
+        raise
+    finally:
+        runtime.analysis_running = False
+        await _async_persist_log(hass, runtime)
+        await runtime.async_persist_recording(hass)

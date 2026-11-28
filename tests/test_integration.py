@@ -375,3 +375,74 @@ async def test_detection_payload_has_no_attribute_bloat(hass: HomeAssistant) -> 
     matched = events[0]["matched"]
     assert matched and "attributes" not in matched[0]  # dropped as dead weight
     assert "entity_id" in matched[0] and "new_state" in matched[0]
+
+
+# -- recording capture rules ---------------------------------------------------
+
+
+async def test_recording_captures_observed_triggers_and_any_actions(
+    hass: HomeAssistant,
+) -> None:
+    """Trigger mode mirrors the feed; action mode also takes unobserved devices."""
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.recording.clear()  # the phpc config dir is shared; start from nothing
+    runtime.recording.set_mode("trigger")
+
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 25, 18, 0, tzinfo=UTC))
+    _fire_state_changed(
+        hass, "light.unwatched", "off", "on", datetime(2026, 11, 25, 18, 0, 30, tzinfo=UTC)
+    )  # not observed: not feed content, not a trigger
+    _fire_state_changed(
+        hass, KITCHEN, "unavailable", "on", datetime(2026, 11, 25, 18, 1, tzinfo=UTC)
+    )  # availability noise is never a demonstration
+    await hass.async_block_till_done()
+    assert [i.entity_id for i in runtime.recording.triggers] == [OFFICE]
+
+    runtime.recording.set_mode("action")
+    _fire_state_changed(
+        hass, "switch.desk", "off", "on", datetime(2026, 11, 25, 18, 2, tzinfo=UTC)
+    )  # the point of action mode: unobserved target devices count too
+    _fire_state_changed(hass, OFFICE, "on", "off", datetime(2026, 11, 25, 18, 3, tzinfo=UTC))
+    await hass.async_block_till_done()
+    assert [i.entity_id for i in runtime.recording.actions] == ["switch.desk", OFFICE]
+
+    # Nothing armed: plain events are not captured.
+    runtime.recording.set_mode("off")
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 25, 18, 4, tzinfo=UTC))
+    await hass.async_block_till_done()
+    assert len(runtime.recording.triggers) == 1
+
+
+async def test_action_capture_never_leaks_into_detection(hass: HomeAssistant) -> None:
+    """Capturing an excluded entity must not hand it to the engine."""
+    seed_behaviours(hass, end_of_work_day())  # CONFIRMED office→off ⇒ kitchen→on
+    await setup_entry(hass, data={CONF_ENTITIES: [OFFICE], CONF_EXCLUDE_ENTITIES: [KITCHEN]})
+    detections = capture_events(hass, EVENT_BEHAVIOUR_DETECTED)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    runtime = hass.data[DOMAIN][entry.entry_id]
+
+    runtime.recording.clear()  # shared phpc config dir: known starting state
+    runtime.recording.set_mode("action")
+    await fire_evening(hass, day=25)  # office observed, kitchen excluded
+
+    assert detections == []  # the excluded step never reached the engine
+    assert [i.entity_id for i in runtime.recording.actions] == [OFFICE, KITCHEN]
+
+
+async def test_recording_survives_entry_reload(hass: HomeAssistant) -> None:
+    entry = await setup_entry(hass)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    runtime.recording.clear()  # shared phpc config dir: known starting state
+    runtime.recording.set_mode("trigger")
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 25, 18, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
+    runtime.recording.notes = "weekday demo"
+    await runtime.async_persist_recording(hass)
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    restored = hass.data[DOMAIN][entry.entry_id]
+    assert restored.recording.mode == "trigger"
+    assert [i.entity_id for i in restored.recording.triggers] == [OFFICE]
+    assert restored.recording.notes == "weekday demo"

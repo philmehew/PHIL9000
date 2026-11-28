@@ -37,6 +37,7 @@ from .const import (
     OPTION_ANALYSIS_ENABLED,
     PANEL_URL_PATH,
     PANEL_WEBCOMPONENT,
+    RECORDING_FILE,
     SAVE_DEBOUNCE_SECONDS,
     SERVICE_CONFIRM_BEHAVIOUR,
     SERVICE_DISMISS_BEHAVIOUR,
@@ -53,8 +54,9 @@ from .models import (
     BehaviourStep,
     Observation,
 )
+from .recording import RecordingSession
 from .subscriptions import Subscriptions, registry_is_noise
-from .yaml_store import AnalysisLogStore, BehaviourStore
+from .yaml_store import AnalysisLogStore, BehaviourStore, RecordingStore
 
 __all__ = [
     "Behaviour",
@@ -105,6 +107,13 @@ class Phil9000Runtime:
     analysis_log_store: AnalysisLogStore | None = None
     # Panel subscribers for the live analysis log (same contract as above).
     analysis_log_subscribers: list[Callable[[dict], None]] = field(default_factory=list)
+    # The teaching-in-progress session (see recording.py): captured triggers
+    # and actions, notes, and the LLM's proposal, edited in the panel.
+    recording: RecordingSession = field(default_factory=RecordingSession)
+    recording_store: RecordingStore | None = None
+    # Panel subscribers for the live recording session (same contract: one
+    # full session snapshot per change, callbacks never raising).
+    recording_subscribers: list[Callable[[dict], None]] = field(default_factory=list)
 
     # -- mutations shared by services and the websocket API --------------
 
@@ -140,6 +149,24 @@ class Phil9000Runtime:
         behaviour.custom_name = True
         await _async_save(hass, self)
         return behaviour
+
+    async def async_persist_recording(self, hass: HomeAssistant) -> None:
+        """Write recording.yaml; a session save must never break the caller."""
+        if self.recording_store is None:
+            return
+        try:
+            await hass.async_add_executor_job(self.recording_store.save, self.recording)
+        except OSError:
+            _LOGGER.warning("PHIL9000 could not persist the recording session", exc_info=True)
+
+    def push_recording(self) -> None:
+        """Push the current session snapshot to every recording subscriber."""
+        payload = self.recording.to_dict()
+        for subscriber in list(self.recording_subscribers):
+            try:
+                subscriber(payload)
+            except Exception:  # noqa: BLE001 — a stale connection must not break capture
+                _LOGGER.debug("PHIL9000 recording subscriber failed", exc_info=True)
 
     def schedule_save(self, hass: HomeAssistant) -> None:
         """Persist soon, collapsing bursts of occurrence-counter bumps.
@@ -207,6 +234,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Analysis log: small persisted ring buffer shown under the activity
     # feed. Loaded leniently (never fails setup — it is decoration, not data).
     analysis_log_store = AnalysisLogStore(hass.config.path(CONFIG_DIR, ANALYSIS_LOG_FILE))
+    recording_store = RecordingStore(hass.config.path(CONFIG_DIR, RECORDING_FILE))
     runtime = Phil9000Runtime(
         engine=engine,
         store=store,
@@ -215,6 +243,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         options_snapshot=dict(entry.options),
         analysis_log=await hass.async_add_executor_job(analysis_log_store.load),
         analysis_log_store=analysis_log_store,
+        recording=await hass.async_add_executor_job(recording_store.load),
+        recording_store=recording_store,
     )
     hass.data[DOMAIN][entry.entry_id] = runtime
 
@@ -426,15 +456,26 @@ def _event_handler(
             # Attribute-only change: never matches a step, and it would flood
             # the activity feed (chatty sensors update attributes constantly).
             return
-        if not runtime.subscriptions.matches(entity_id, runtime.is_noise):
-            return
         observation = Observation(
             entity_id=entity_id,
             new_state=new_state.state,
             old_state=old_state.state if old_state else None,
             timestamp=new_state.last_changed,
         )
-        _publish_activity(runtime, observation)
+        observed = runtime.subscriptions.matches(entity_id, runtime.is_noise)
+        mode = runtime.recording.mode
+        if not observed and mode != "action":
+            return  # unobserved: not in the feed, not for the engine either
+        if observed:
+            _publish_activity(runtime, observation)
+            if mode is not None:
+                _capture_recording(hass, runtime, mode, observation)
+        else:
+            # Action capture on an unobserved entity: a deliberate change to a
+            # device the user chose to replay later. Capture only — mutes and
+            # unobserved entities must never reach the detection engine.
+            _capture_recording(hass, runtime, "action", observation)
+            return
         if not engine.involves(entity_id):
             return  # no sequence involves this entity: nothing can change
         before = {bid: b.occurrences for bid, b in engine.behaviours.items()}
@@ -488,6 +529,27 @@ def _publish_activity(runtime: Phil9000Runtime, observation: Observation) -> Non
             subscriber(row)
         except Exception:  # noqa: BLE001 — a stale connection must not break observing
             _LOGGER.debug("PHIL9000 activity subscriber failed", exc_info=True)
+
+
+def _capture_recording(
+    hass: HomeAssistant, runtime: Phil9000Runtime, kind: str, observation: Observation
+) -> None:
+    """Append a live state change to the recording session (user-paced, saved now)."""
+    if is_feed_noise({"old_state": observation.old_state, "new_state": observation.new_state}):
+        # Availability bookkeeping — and HA's startup restore of every known
+        # entity (a restored switch writing "off", a first-seen entity's
+        # "None -> state") — is never a demonstration: with recording armed
+        # across a restart, these walls would bury the real captures.
+        return
+    runtime.recording.capture(
+        kind,
+        observation.entity_id,
+        observation.old_state,
+        observation.new_state,
+        observation.timestamp,
+    )
+    runtime.push_recording()
+    hass.async_create_task(runtime.async_persist_recording(hass))
 
 
 async def _notify_suggestion(hass: HomeAssistant, entry: ConfigEntry, behaviour: Behaviour) -> None:

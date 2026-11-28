@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from .models import Behaviour
+from .recording import RecordingSession
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,6 +82,43 @@ class BehaviourStore:
         behaviours = [b for b in self.load() if b.id != behaviour_id]
         self.save(behaviours)
         return behaviours
+
+
+class RecordingStore:
+    """Loads and saves the recording session (atomic write, lenient load).
+
+    A recording in progress is user effort, so the write happens on every
+    mutation; but a damaged file is an empty session, never a setup failure —
+    the patterns that matter live in behaviours.yaml.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def load(self) -> RecordingSession:
+        if not self.path.exists():
+            return RecordingSession()
+        try:
+            with self.path.open("r", encoding="utf-8") as fh:
+                raw: Any = yaml.safe_load(fh) or {}
+        except (OSError, yaml.YAMLError):
+            _LOGGER.warning("PHIL9000 ignoring unreadable recording file %s", self.path)
+            return RecordingSession()
+        recording = raw.get("recording")
+        return RecordingSession.from_dict(recording if isinstance(recording, dict) else {})
+
+    def save(self, session: RecordingSession) -> None:
+        payload = {"version": _SCHEMA_VERSION, "recording": session.to_dict()}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                yaml.safe_dump(payload, fh, sort_keys=False, allow_unicode=True)
+            os.replace(tmp, self.path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
 
 
 class AnalysisLogStore:

@@ -26,6 +26,7 @@ PURE_MODULES = [
     "activity.py",
     "analyser.py",
     "analysis.py",
+    "recording.py",
     "notifier.py",
     "subscriptions.py",
     "websocket_api.py",

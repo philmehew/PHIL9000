@@ -9,7 +9,10 @@
  * phil9000/subscribe_analysis_log, phil9000/run_analysis, phil9000/set_status,
  * phil9000/set_name, phil9000/set_actions, phil9000/monitoring,
  * phil9000/set_observed, phil9000/set_domains, phil9000/mute_entity,
- * phil9000/unmute_entity); the panel refreshes on
+ * phil9000/unmute_entity, phil9000/record_status, phil9000/record_mode,
+ * phil9000/record_remove, phil9000/record_notes, phil9000/record_clear,
+ * phil9000/record_propose, phil9000/record_refine, phil9000/record_save,
+ * phil9000/subscribe_recording); the panel refreshes on
  * phil9000_behaviour_detected.
  */
 
@@ -170,6 +173,35 @@ const STYLE = `
                   background: var(--card-background-color);
                   color: var(--primary-text-color); }
     .empty { color: var(--secondary-text-color); font-size: 14px; }
+    button.armed { background: #c0392b; animation: phil-pulse 1.6s ease-in-out infinite; }
+    @keyframes phil-pulse { 50% { opacity: .65; } }
+    .rec-card { background: var(--card-background-color); border-radius: 10px;
+                padding: 12px 16px; margin-bottom: 12px;
+                box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+    .rec-card h4 { margin: 0 0 2px; font-size: 15px; font-weight: 500; }
+    .rec-heading { font-size: 12px; font-weight: 500; text-transform: uppercase;
+                   letter-spacing: .05em; color: var(--secondary-text-color);
+                   margin: 10px 0 4px; }
+    .rec-list { list-style: none; margin: 0; padding: 0; font-size: 13px;
+                max-height: 190px; overflow-y: auto; }
+    .rec-list li { display: flex; gap: 10px; padding: 3px 0;
+                   align-items: baseline; border-bottom: 1px solid var(--divider-color); }
+    .rec-list li:last-child { border-bottom: none; }
+    .rec-hint { font-size: 12px; color: var(--secondary-text-color); }
+    .rec-notes { width: 100%; box-sizing: border-box; min-height: 54px;
+                 padding: 7px 10px; border: 1px solid var(--divider-color);
+                 border-radius: 8px; background: var(--card-background-color);
+                 color: var(--primary-text-color); font-size: 13px; margin: 4px 0;
+                 font-family: inherit; }
+    .proposal { border: 1px dashed var(--divider-color); border-radius: 8px;
+                padding: 10px 12px; margin: 10px 0; font-size: 13px; }
+    .refine-row { display: flex; gap: 8px; margin-top: 8px; }
+    .refine-row input { flex: 1; padding: 6px 8px; border: 1px solid var(--divider-color);
+                border-radius: 6px; background: var(--card-background-color);
+                color: var(--primary-text-color); font-size: 12px; min-width: 0; }
+    .rec-mark { flex: 0 0 16px; font-size: 12px; }
+    .rec-mark.trigger { color: #c0392b; }
+    .rec-mark.action { color: #e67e22; }
   </style>`;
 
 class Phil9000Panel extends HTMLElement {
@@ -205,6 +237,13 @@ class Phil9000Panel extends HTMLElement {
     this._analysisLog = null; // entries from phil9000/analysis_log (newest first)
     this._monitoring = null;
     this._entityFilter = "";
+    // Recording (teach-by-demonstration): session snapshot, in-flight LLM
+    // proposal flag, and the text the user has typed into the notes/refine
+    // boxes but not yet sent (so live pushes don't wipe it).
+    this._recording = null;
+    this._proposing = false;
+    this._notesDraft = null;
+    this._refineDraft = "";
     // Confirmed behaviours execute service calls, so amending them (and
     // subscriptions/analysis) is admin-only on the backend; reflect that.
     this._readOnly = hass.user && hass.user.is_admin === false;
@@ -215,8 +254,15 @@ class Phil9000Panel extends HTMLElement {
       <div class="top-grid">
         <div id="activity-col">
           <div class="section-head"><h2 class="section">Recent activity</h2>
+            <button data-act="record-arm" data-mode="trigger" ${this._readOnly ? "disabled" : ""}
+              title="Capture the state changes that should trigger the automation">● Record trigger</button>
+            <button data-act="record-arm" data-mode="action" ${this._readOnly ? "disabled" : ""}
+              title="Capture the changes the automation should replay">● Record action</button>
+            <button class="secondary" data-act="record-arm" data-mode="off" ${this._readOnly ? "disabled" : ""}
+              title="Stop capturing">Stop</button>
             <input class="activity-search" type="search" placeholder="Filter — entity or state…" />
             <button class="secondary" data-act="pause">Pause</button></div>
+          <div id="recording"></div>
           <div id="activity"><div class="card"><ul class="act-list">
             <li class="empty">Loading…</li>
           </ul></div></div>
@@ -248,6 +294,8 @@ class Phil9000Panel extends HTMLElement {
         this._activityFilter = ev.target.value.trim().toLowerCase();
         this._renderActivity();
       }
+      if (ev.target.id === "rec-notes") this._notesDraft = ev.target.value;
+      if (ev.target.classList.contains("refine-input")) this._refineDraft = ev.target.value;
     });
     this.shadow.addEventListener("change", (ev) => {
       const box = ev.target.closest("input[data-act='set-observed']");
@@ -264,6 +312,10 @@ class Phil9000Panel extends HTMLElement {
           this._renaming = null;
           this._render();
         }
+      }
+      if (ev.target.classList.contains("refine-input") && ev.key === "Enter") {
+        const btn = this.shadow.querySelector('[data-act="rec-refine"]');
+        if (btn && !btn.disabled) btn.click();
       }
     });
 
@@ -314,10 +366,23 @@ class Phil9000Panel extends HTMLElement {
         { type: "phil9000/subscribe_analysis_log" },
       ),
     );
+    track(
+      hass.connection.subscribeMessage(
+        (session) => {
+          // One full recording snapshot per change (mode, capture, removal,
+          // notes, proposal) — also delivered when another panel acts.
+          this._recording = session;
+          this._renderRecording();
+          this._renderActivity();
+        },
+        { type: "phil9000/subscribe_recording" },
+      ),
+    );
     this._refresh();
     this._reloadActivity();
     this._loadAnalysisLog();
     this._loadMonitoring();
+    this._loadRecording();
   }
 
   disconnectedCallback() {
@@ -390,17 +455,26 @@ class Phil9000Panel extends HTMLElement {
         <li class="empty">${esc(message)}</li></ul></div>`;
       return;
     }
+    // Mark rows the recording has captured (● trigger, ⚡ action) so the
+    // demonstration is visible in the context of the raw feed.
+    const marks = new Map();
+    if (this._recording) {
+      for (const i of this._recording.triggers || []) marks.set(`${i.at}|${i.entity_id}`, "trigger");
+      for (const i of this._recording.actions || []) marks.set(`${i.at}|${i.entity_id}`, "action");
+    }
     el.innerHTML = `<div class="card"><ul class="act-list">${rows
-      .map(
-        (row) => `<li>
+      .map((row) => {
+        const mark = marks.get(`${row.at}|${row.entity_id}`);
+        return `<li>
+          ${mark ? `<span class="rec-mark ${mark}" title="captured as a recorded ${mark}">${mark === "trigger" ? "●" : "⚡"}</span>` : '<span class="rec-mark"></span>'}
           <span class="act-time">${esc(formatClock(row.at))}</span>
           <span class="act-entity">${esc(row.entity_id)}</span>
           <span class="act-change">${esc(row.old_state ?? "—")} → <b>${esc(row.new_state)}</b></span>
           <button class="secondary mute-btn" data-act="mute" data-entity="${esc(row.entity_id)}"
             ${this._readOnly ? "disabled" : ""}
             title="Mute ${esc(row.entity_id)} — stop observing it (revert in the Entities panel)">⊘</button>
-        </li>`,
-      )
+        </li>`;
+      })
       .join("")}</ul></div>`;
   }
 
@@ -457,6 +531,189 @@ class Phil9000Panel extends HTMLElement {
     btn.textContent = this._paused
       ? `Resume${this._pending.length ? ` (${this._pending.length})` : ""}`
       : "Pause";
+  }
+
+  // -- recording (teach a rule by demonstration) -------------------------
+
+  async _loadRecording() {
+    try {
+      this._recording = await this._hass.connection.sendMessagePromise({
+        type: "phil9000/record_status",
+      });
+    } catch (err) {
+      /* keep whatever snapshot we have */
+    }
+    this._renderRecording();
+  }
+
+  async _recordSend(payload) {
+    this._busy = true;
+    this._renderBanner();
+    this._renderRecording();
+    try {
+      const result = await this._hass.connection.sendMessagePromise(payload);
+      if (result && Array.isArray(result.triggers)) this._recording = result;
+      this._error = null;
+    } catch (err) {
+      this._error = err.message || String(err);
+    }
+    this._busy = false;
+    this._renderBanner();
+    this._renderRecording();
+  }
+
+  _recordArm(mode) {
+    // Pressing the armed mode again disarms it.
+    const current = this._recording ? this._recording.mode : null;
+    return this._recordSend({
+      type: "phil9000/record_mode",
+      mode: current === mode ? "off" : mode,
+    });
+  }
+
+  _recordNotes() {
+    const el = this.shadow.querySelector("#rec-notes");
+    this._notesDraft = null;
+    return this._recordSend({ type: "phil9000/record_notes", notes: el ? el.value : "" });
+  }
+
+  async _recordPropose(message) {
+    this._proposing = true;
+    this._error = null;
+    this._renderRecording();
+    try {
+      await this._hass.connection.sendMessagePromise(
+        message
+          ? { type: "phil9000/record_refine", message }
+          : { type: "phil9000/record_propose" },
+      );
+      if (message) this._refineDraft = "";
+    } catch (err) {
+      this._error = err.message || String(err);
+    }
+    this._proposing = false;
+    await this._loadRecording();
+    this._renderBanner();
+  }
+
+  async _recordSave(direct) {
+    this._busy = true;
+    this._error = null;
+    this._renderBanner();
+    this._renderRecording();
+    try {
+      const res = await this._hass.connection.sendMessagePromise({
+        type: "phil9000/record_save",
+        direct,
+      });
+      this._recording = await this._hass.connection.sendMessagePromise({
+        type: "phil9000/record_status",
+      });
+      this._notesDraft = null;
+      this._refineDraft = "";
+      this._noteKind = "note";
+      this._analysisNote = `Automation created from the recording (${res.behaviour_id}) — confirm, rename or edit its actions in the Behaviours list below.`;
+    } catch (err) {
+      this._error = err.message || String(err);
+    }
+    this._busy = false;
+    this._render();
+  }
+
+  _recordClear() {
+    this._notesDraft = null;
+    this._refineDraft = "";
+    return this._recordSend({ type: "phil9000/record_clear" });
+  }
+
+  _renderRecording() {
+    const el = this.shadow.querySelector("#recording");
+    if (!el) return;
+    const s = this._recording;
+    const mode = s ? s.mode : null;
+    this.shadow.querySelectorAll("[data-act='record-arm']").forEach((btn) => {
+      btn.classList.toggle("armed", !!mode && btn.dataset.mode === mode);
+    });
+    const empty =
+      !s ||
+      (!mode &&
+        !(s.triggers || []).length &&
+        !(s.actions || []).length &&
+        !s.notes &&
+        !s.proposal);
+    if (empty) {
+      el.innerHTML = "";
+      return;
+    }
+    const locked = this._readOnly || this._busy;
+    const itemRow = (i, kind) => `<li>
+      <span class="act-time">${esc(formatClock(i.at))}</span>
+      <span class="act-entity">${esc(i.entity_id)}</span>
+      <span class="act-change">${esc(i.from_state ?? "—")} → <b>${esc(i.to_state)}</b></span>
+      <button class="danger mute-btn" data-act="rec-remove" data-kind="${kind}"
+        data-item="${esc(i.item_id)}" ${locked ? "disabled" : ""}
+        title="Remove this recorded ${kind} — it will not be part of the automation">×</button>
+    </li>`;
+    const list = (items, kind) =>
+      (items || []).length
+        ? `<ul class="rec-list">${items.map((i) => itemRow(i, kind)).join("")}</ul>`
+        : `<div class="rec-hint">nothing captured yet</div>`;
+    const notes = this._notesDraft !== null ? this._notesDraft : s.notes || "";
+    let html = `<div class="rec-card">`;
+    if (mode === "trigger")
+      html += `<div class="running">Recording triggers — go and do the thing that should set the automation off.</div>`;
+    if (mode === "action")
+      html += `<div class="running">Recording actions — now change what the automation should replay later.</div>`;
+    html += `<div class="rec-heading">Recorded triggers</div>${list(s.triggers, "trigger")}`;
+    html += `<div class="rec-heading">Recorded actions</div>${list(s.actions, "action")}`;
+    html += `<div class="rec-heading">Notes for the proposal</div>
+      <textarea id="rec-notes" class="rec-notes" ${locked ? "disabled" : ""}
+        placeholder="What should the LLM know? e.g. weekdays only; dim the strip to 30% warm…">${esc(notes)}</textarea>
+      <div class="row"><button class="secondary" data-act="rec-notes-save" ${locked ? "disabled" : ""}>Save notes</button></div>`;
+    if (s.proposal) html += this._proposalCard(s.proposal);
+    const busy = locked || this._proposing;
+    html += `<div class="row">
+      <button data-act="rec-propose" ${busy ? "disabled" : ""}>✨ Propose automation</button>
+      <button class="secondary" data-act="rec-save-direct" ${busy ? "disabled" : ""}
+        title="Skip the LLM: triggers as recorded, on/off actions mapped mechanically">Save as-is (no LLM)</button>
+      <button class="danger" data-act="rec-clear" ${busy ? "disabled" : ""}>Discard</button>
+    </div>`;
+    if (this._proposing)
+      html += `<div class="running">Asking the model — this can take a minute; progress appears in the Analysis log.</div>`;
+    html += `</div>`;
+    el.innerHTML = html;
+  }
+
+  _proposalCard(p) {
+    const steps = (p.steps || [])
+      .map(
+        (s, i) =>
+          `${i ? " → " : ""}${esc(s.entity_id)} = ${esc(s.to_state)}` +
+          (i ? ` (≤${Math.round((s.max_gap_seconds || 300) / 60)}m)` : ""),
+      )
+      .join("");
+    const actions = p.actions || [];
+    const window =
+      p.time_start && p.time_end ? `${p.time_start}–${p.time_end} UTC` : "any time";
+    const busy = this._readOnly || this._busy || this._proposing;
+    return `<div class="proposal">
+      <div class="rec-heading">Proposed automation</div>
+      <h4>${esc(p.name)}</h4>
+      ${p.description ? `<div class="lines">${esc(p.description)}</div>` : ""}
+      <div class="steps">${steps}</div>
+      <div class="lines">${weekdaySummary(p.weekdays)} · ${window} ·
+        cooldown ${Math.round((p.cooldown_seconds || 3600) / 60)} min</div>
+      ${actions.length ? `<ul class="actions-list">${actions.map((a) => `<li>${actionLabel(a)}</li>`).join("")}</ul>` : `<div class="lines">no actions proposed</div>`}
+      ${p.reply ? `<div class="lines">“${esc(p.reply)}”</div>` : ""}
+      <div class="refine-row">
+        <input class="refine-input" value="${esc(this._refineDraft)}" ${busy ? "disabled" : ""}
+          placeholder="tell me to change it — e.g. only on weekdays, and add 5 minutes…" />
+        <button data-act="rec-refine" ${busy ? "disabled" : ""}>Refine</button>
+      </div>
+      <div class="row">
+        <button data-act="rec-save" ${busy ? "disabled" : ""}>✔ Create automation</button>
+      </div>
+    </div>`;
   }
 
   async _loadMonitoring() {
@@ -679,6 +936,27 @@ class Phil9000Panel extends HTMLElement {
     if (act === "analyse") return this._analyse();
     if (act === "pause") return this._togglePause();
     if (act === "mute") return this._setObserved(btn.dataset.entity, false);
+    if (act === "record-arm") return this._recordArm(btn.dataset.mode);
+    if (act === "rec-remove")
+      return this._recordSend({
+        type: "phil9000/record_remove",
+        kind: btn.dataset.kind,
+        item_id: btn.dataset.item,
+      });
+    if (act === "rec-notes-save") return this._recordNotes();
+    if (act === "rec-propose") return this._recordPropose(null);
+    if (act === "rec-refine") {
+      const input = this.shadow.querySelector(".refine-input");
+      const message = input ? input.value.trim() : "";
+      if (!message) return undefined;
+      return this._recordPropose(message);
+    }
+    if (act === "rec-save") return this._recordSave(false);
+    if (act === "rec-save-direct") return this._recordSave(true);
+    if (act === "rec-clear") {
+      if (!window.confirm("Discard the recorded demonstration?")) return undefined;
+      return this._recordClear();
+    }
     if (act === "rename") {
       this._renaming = id;
       return this._render();

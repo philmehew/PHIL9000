@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.8.0 — 2026-11-28
+
+### Record: teach a rule by demonstration
+
+- New **Record** flow in the panel: **● Record trigger** captures what should set the
+  automation off (observed entities, i.e. feed content), **● Record action** captures
+  the change to replay later — deliberately *not* limited to observed entities, so the
+  lamp you switch need not be a monitored sensor. Availability bookkeeping and
+  attribute-only churn are never captured, and captures never leak past the
+  subscription filter into the detection engine.
+- Captured items appear under **Recorded triggers** / **Recorded actions** headings
+  above the feed (with ●/⚡ markers on the feed rows themselves); each can be removed
+  with ×, and free-form **notes** give the model context for the proposal.
+- **✨ Propose automation** turns the demonstration into a full definition via the
+  configured ai_task/conversation agent: gaps with slack around the observed rhythm,
+  schedule only when the demo/notes justify it, and recorded state changes converted to
+  service calls enriched from the notes. **Refine** iterates by chat. Guardrails:
+  steps may only use recorded trigger entities (hallucinated steps dropped with visible
+  reasons), and the proposal is shown before anything is created.
+- **✔ Create automation** saves the result as a CONFIRMED behaviour (confidence 1.0,
+  `rec-` id): you taught it explicitly, so it skips the candidate phase and runs on the
+  existing pure-Python detection/action engine from the next event. **Save as-is (no
+  LLM)** maps simple on/off (and cover/lock/media) transitions directly.
+- The session persists to `phil9000/recording.yaml` (lenient load — a damaged file is
+  an empty session, never a failed setup) and streams live to every open panel via
+  `phil9000/subscribe_recording`. Proposal progress and guardrail drops land in the
+  Analysis log; the single-flight guard covers analysis and proposals together.
+- New pure module `recording.py` (session model, prompts, parser) keeps the LLM
+  boundary deterministic and HA-free, per the project's architecture.
+
 ## v0.7.3 — 2026-11-28
 
 ### No more silent guardrail drops — and the model stops restating dismissed patterns

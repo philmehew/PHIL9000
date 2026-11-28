@@ -23,6 +23,7 @@ from .const import (
     domain_label_parts,
 )
 from .models import BehaviourAction, BehaviourStatus
+from .recording import direct_behaviour, proposal_to_behaviour
 from .subscriptions import is_valid_entity_id
 
 if TYPE_CHECKING:
@@ -449,6 +450,179 @@ def async_setup(hass: HomeAssistant) -> None:
             await hass.async_block_till_done()  # listener swaps subscriptions first
         connection.send_result(msg["id"], {"domains": sorted(wanted)})
 
+    # -- recording (teach a rule by demonstration) --------------------------
+
+    @websocket_api.websocket_command({"type": "phil9000/record_status"})
+    @websocket_api.async_response
+    async def handle_record_status(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        if (runtime := _require(hass, connection, msg)) is None:
+            return
+        connection.send_result(msg["id"], runtime.recording.to_dict())
+
+    @websocket_api.websocket_command(
+        {
+            "type": "phil9000/record_mode",
+            vol.Required("mode"): vol.In(["trigger", "action", "off"]),
+        }
+    )
+    @websocket_api.async_response
+    async def handle_record_mode(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Arm trigger/action capture, or stop it ("off")."""
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
+            return
+        runtime.recording.set_mode(msg["mode"])
+        await runtime.async_persist_recording(hass)
+        runtime.push_recording()
+        connection.send_result(msg["id"], runtime.recording.to_dict())
+
+    @websocket_api.websocket_command(
+        {
+            "type": "phil9000/record_remove",
+            vol.Required("kind"): vol.In(["trigger", "action"]),
+            vol.Required("item_id"): str,
+        }
+    )
+    @websocket_api.async_response
+    async def handle_record_remove(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Drop an irrelevant capture (the panel's × on a recorded row)."""
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
+            return
+        if not runtime.recording.remove(msg["kind"], msg["item_id"]):
+            connection.send_error(
+                msg["id"], websocket_api.ERR_NOT_FOUND, f"unknown item {msg['item_id']!r}"
+            )
+            return
+        await runtime.async_persist_recording(hass)
+        runtime.push_recording()
+        connection.send_result(msg["id"], runtime.recording.to_dict())
+
+    @websocket_api.websocket_command(
+        {
+            "type": "phil9000/record_notes",
+            vol.Required("notes"): vol.All(str, vol.Length(max=2000)),
+        }
+    )
+    @websocket_api.async_response
+    async def handle_record_notes(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Supporting notes: context for the LLM proposal."""
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
+            return
+        runtime.recording.notes = msg["notes"].strip()
+        await runtime.async_persist_recording(hass)
+        runtime.push_recording()
+        connection.send_result(msg["id"], runtime.recording.to_dict())
+
+    @websocket_api.websocket_command({"type": "phil9000/record_clear"})
+    @websocket_api.async_response
+    async def handle_record_clear(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Discard the recording session."""
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
+            return
+        runtime.recording.clear()
+        await runtime.async_persist_recording(hass)
+        runtime.push_recording()
+        connection.send_result(msg["id"], runtime.recording.to_dict())
+
+    async def _async_proposal(
+        hass: HomeAssistant,
+        connection: ActiveConnection,
+        msg: dict[str, Any],
+        *,
+        message: str | None,
+    ) -> None:
+        """Shared body for propose/refine: one LLM turn over the demonstration."""
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
+            return
+        entry = _entry(hass)
+        try:
+            proposal = await analysis.async_run_recording_pass(
+                hass, entry, runtime, message=message
+            )
+        except analysis.AnalysisUnavailableError as err:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_SUPPORTED, str(err))
+            return
+        runtime.push_recording()
+        connection.send_result(msg["id"], {"proposal": proposal})
+
+    @websocket_api.websocket_command({"type": "phil9000/record_propose"})
+    @websocket_api.async_response
+    async def handle_record_propose(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        await _async_proposal(hass, connection, msg, message=None)
+
+    @websocket_api.websocket_command(
+        {
+            "type": "phil9000/record_refine",
+            vol.Required("message"): vol.All(str, vol.Length(min=1, max=500)),
+        }
+    )
+    @websocket_api.async_response
+    async def handle_record_refine(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        await _async_proposal(hass, connection, msg, message=msg["message"])
+
+    @websocket_api.websocket_command(
+        {"type": "phil9000/record_save", vol.Optional("direct", default=False): bool}
+    )
+    @websocket_api.async_response
+    async def handle_record_save(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Create a CONFIRMED behaviour from the recording (proposal, or direct)."""
+        if (runtime := _require(hass, connection, msg, admin=True)) is None:
+            return
+        try:
+            if msg["direct"]:
+                behaviour = direct_behaviour(runtime.recording)
+            elif runtime.recording.proposal is not None:
+                behaviour = proposal_to_behaviour(runtime.recording.proposal)
+            else:
+                raise ValueError("no proposal to create — press Propose first, or Save as-is")
+        except ValueError as err:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_SUPPORTED, str(err))
+            return
+        runtime.engine.add_behaviour(behaviour)
+        await hass.async_add_executor_job(
+            runtime.store.save, list(runtime.engine.behaviours.values())
+        )
+        runtime.recording.clear()
+        await runtime.async_persist_recording(hass)
+        runtime.push_recording()
+        _LOGGER.info("Created recorded behaviour %r (%s)", behaviour.name, behaviour.id)
+        connection.send_result(msg["id"], {"behaviour_id": behaviour.id})
+
+    @websocket_api.websocket_command({"type": "phil9000/subscribe_recording"})
+    @websocket_api.async_response
+    async def handle_subscribe_recording(
+        hass: HomeAssistant, connection: ActiveConnection, msg: dict[str, Any]
+    ) -> None:
+        """Live recording session: one full snapshot per change."""
+        if (runtime := _require(hass, connection, msg)) is None:
+            return
+        connection.send_result(msg["id"])
+
+        def push(session: dict[str, Any]) -> None:
+            connection.send_message(websocket_api.event_message(msg["id"], session))
+
+        def unsubscribe() -> None:
+            if push in runtime.recording_subscribers:
+                runtime.recording_subscribers.remove(push)
+
+        runtime.recording_subscribers.append(push)
+        connection.subscriptions[msg["id"]] = unsubscribe
+
     for handler in (
         handle_behaviours,
         handle_set_status,
@@ -464,5 +638,14 @@ def async_setup(hass: HomeAssistant) -> None:
         handle_unmute_entity,
         handle_set_observed,
         handle_set_domains,
+        handle_record_status,
+        handle_record_mode,
+        handle_record_remove,
+        handle_record_notes,
+        handle_record_clear,
+        handle_record_propose,
+        handle_record_refine,
+        handle_record_save,
+        handle_subscribe_recording,
     ):
         websocket_api.async_register_command(hass, handler)

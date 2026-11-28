@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -20,6 +21,7 @@ from tests.helpers import (
     KITCHEN,
     OFFICE,
     _fire_state_changed,
+    capture_calls,
     capture_events,
     fire_evening,
     flush_saves,
@@ -594,14 +596,229 @@ async def test_mutating_commands_require_admin(
         {"type": "phil9000/set_observed", "entity_id": OFFICE, "observed": False},
         {"type": "phil9000/set_domains", "domains": ["switch"]},
         {"type": "phil9000/run_analysis"},
+        {"type": "phil9000/record_mode", "mode": "trigger"},
+        {"type": "phil9000/record_remove", "kind": "trigger", "item_id": "abc"},
+        {"type": "phil9000/record_notes", "notes": "hi"},
+        {"type": "phil9000/record_clear"},
+        {"type": "phil9000/record_propose"},
+        {"type": "phil9000/record_refine", "message": "hi"},
+        {"type": "phil9000/record_save"},
     ]
     for i, payload in enumerate(mutations, start=3):
         out = await _send(client, i, payload)
         assert out["success"] is False, payload
         assert out["error"]["code"] == "unauthorized", payload
 
+    # The recording surface stays readable for everyone.
+    out = await _send(client, len(mutations) + 3, {"type": "phil9000/record_status"})
+    assert out["success"] is True
+
     # And nothing actually changed.
     runtime = hass.data[DOMAIN][entry.entry_id]
     assert runtime.engine.behaviours["end_of_work_day"].status is BehaviourStatus.CONFIRMED
     assert entry.data == {CONF_ENTITIES: [OFFICE, KITCHEN]}
     assert not entry.data.get(CONF_EXCLUDE_ENTITIES)
+
+
+# -- recording (teach a rule by demonstration) --------------------------------
+
+
+async def test_record_flow_capture_prune_notes_and_persist(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    from custom_components.phil9000.yaml_store import RecordingStore
+
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+
+    # The phpc config dir is shared between tests; start from an empty
+    # session. (Command ids must strictly increase per connection.)
+    assert (await _send(client, 1, {"type": "phil9000/record_clear"}))["success"] is True
+
+    out = await _send(client, 2, {"type": "phil9000/record_status"})
+    assert out["success"] is True
+    assert out["result"]["mode"] is None and out["result"]["triggers"] == []
+
+    out = await _send(client, 3, {"type": "phil9000/record_mode", "mode": "trigger"})
+    assert out["result"]["mode"] == "trigger" and out["result"]["started_at"]
+
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 25, 18, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+    out = await _send(client, 4, {"type": "phil9000/record_mode", "mode": "action"})
+    assert [i["entity_id"] for i in out["result"]["triggers"]] == [OFFICE]
+
+    # switch.desk is not an observed entity — actions capture it anyway.
+    _fire_state_changed(hass, "switch.desk", "off", "on", datetime(2026, 11, 25, 18, 2, tzinfo=UTC))
+    await hass.async_block_till_done()
+    out = await _send(client, 5, {"type": "phil9000/record_status"})
+    assert [i["entity_id"] for i in out["result"]["actions"]] == ["switch.desk"]
+
+    # Prune an irrelevant capture, then drop the session back to one item.
+    item_id = out["result"]["triggers"][0]["item_id"]
+    out = await _send(
+        client, 6, {"type": "phil9000/record_remove", "kind": "trigger", "item_id": item_id}
+    )
+    assert out["result"]["triggers"] == []
+    out = await _send(
+        client, 7, {"type": "phil9000/record_remove", "kind": "trigger", "item_id": "nope"}
+    )
+    assert out["success"] is False and out["error"]["code"] == "not_found"
+
+    out = await _send(client, 8, {"type": "phil9000/record_notes", "notes": " weekdays only "})
+    assert out["result"]["notes"] == "weekdays only"
+
+    # The session lives on disk, so an HA restart mid-recording loses nothing.
+    session = RecordingStore(hass.config.path("phil9000", "recording.yaml")).load()
+    assert session.mode == "action"
+    assert session.notes == "weekdays only"
+    assert [i.entity_id for i in session.actions] == ["switch.desk"]
+
+    out = await _send(client, 9, {"type": "phil9000/record_clear"})
+    assert out["result"]["triggers"] == [] and out["result"]["mode"] is None
+
+
+async def test_subscribe_recording_pushes_snapshots(hass: HomeAssistant, hass_ws_client) -> None:
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+    assert (await _send(client, 6, {"type": "phil9000/record_clear"}))["success"] is True
+    await client.send_json({"id": 7, "type": "phil9000/subscribe_recording"})
+    out = await client.receive_json()
+    assert out["success"] is True
+
+    # The handler pushes before replying: event first, then the command result.
+    await client.send_json({"id": 8, "type": "phil9000/record_mode", "mode": "trigger"})
+    push = await client.receive_json()
+    assert push["id"] == 7 and push["event"]["mode"] == "trigger"
+    out = await client.receive_json()
+    assert out["id"] == 8 and out["success"] is True
+
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 25, 18, 0, tzinfo=UTC))
+    await hass.async_block_till_done()
+    push = await client.receive_json()
+    assert push["id"] == 7
+    assert [i["entity_id"] for i in push["event"]["triggers"]] == [OFFICE]
+
+
+RECORD_REPLY = json.dumps(
+    {
+        "name": "Desk work start",
+        "description": "Phil's desk wakes up when work starts.",
+        "steps": [
+            {"entity_id": OFFICE, "to_state": "on"},
+            {"entity_id": KITCHEN, "to_state": "on", "max_gap_seconds": 420},
+        ],
+        "weekdays": [1, 2, 3, 4, 5],
+        "time_start": "08:00",
+        "time_end": "11:00",
+        "cooldown_seconds": 3600,
+        "actions": [
+            {"domain": "switch", "service": "turn_on", "entity_id": "switch.desk", "data": {}}
+        ],
+        "reply": "Desk power on when work starts, weekday mornings.",
+    }
+)
+
+
+class _FakeRecordAgent:
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.calls: list[str] = []
+
+    async def __call__(self, hass, agent_id, prompt):  # noqa: ANN001
+        self.calls.append(prompt)
+        return self.reply
+
+
+async def _record_morning_demo(hass: HomeAssistant, client: object, base: int) -> None:
+    """Arm, capture office+kitchen triggers and the desk action, disarm."""
+    await _send(client, base + 1, {"type": "phil9000/record_mode", "mode": "trigger"})
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 25, 8, 50, tzinfo=UTC))
+    _fire_state_changed(hass, KITCHEN, "off", "on", datetime(2026, 11, 25, 8, 52, tzinfo=UTC))
+    await hass.async_block_till_done()
+    await _send(client, base + 2, {"type": "phil9000/record_mode", "mode": "action"})
+    _fire_state_changed(hass, "switch.desk", "off", "on", datetime(2026, 11, 25, 8, 53, tzinfo=UTC))
+    await hass.async_block_till_done()
+
+
+async def test_record_propose_refine_and_create(
+    hass: HomeAssistant, hass_ws_client, monkeypatch
+) -> None:
+    calls = capture_calls(hass, "switch", "turn_on")
+    seed_behaviours(hass)  # shared config dir: start with no behaviours at all
+    await setup_entry(hass)
+    agent = _FakeRecordAgent(RECORD_REPLY)
+    monkeypatch.setattr(analysis, "async_call_agent", agent)
+    client = await hass_ws_client(hass)
+    assert (await _send(client, 3, {"type": "phil9000/record_clear"}))["success"] is True
+
+    # An empty session fails friendly, without spending an agent call.
+    out = await _send(client, 4, {"type": "phil9000/record_propose"})
+    assert out["success"] is False and out["error"]["code"] == "not_supported"
+    assert agent.calls == []
+
+    await _record_morning_demo(hass, client, base=5)
+
+    out = await _send(client, 10, {"type": "phil9000/record_propose"})
+    assert out["success"] is True, out
+    proposal = out["result"]["proposal"]
+    assert proposal["name"] == "Desk work start"
+    assert proposal["weekdays"] == [1, 2, 3, 4, 5]
+    # The prompt really showed the model the demonstration.
+    assert "switch.desk off -> on" in agent.calls[0]
+    assert "(+120s)" in agent.calls[0]
+
+    # Refine: the model replies with the weekday constraint removed.
+    agent.reply = json.dumps({**json.loads(RECORD_REPLY), "weekdays": [], "reply": "Any day now."})
+    out = await _send(client, 11, {"type": "phil9000/record_refine", "message": "any day please"})
+    assert out["success"] is True, out
+    assert out["result"]["proposal"]["weekdays"] == []
+    assert "any day please" in agent.calls[1]
+    assert "Desk work start" in agent.calls[1]  # the current proposal was included
+
+    out = await _send(client, 12, {"type": "phil9000/record_save"})
+    assert out["success"] is True, out
+    behaviour_id = out["result"]["behaviour_id"]
+    assert behaviour_id.startswith("rec-")
+
+    created = {b.id: b for b in reload_behaviours(hass)}[behaviour_id]
+    assert created.status is BehaviourStatus.CONFIRMED
+    assert created.confidence == 1.0
+    assert created.actions[0].entity_id == "switch.desk"
+
+    # The session was discarded…
+    out = await _send(client, 13, {"type": "phil9000/record_status"})
+    assert out["result"]["triggers"] == [] and out["result"]["proposal"] is None
+
+    # …and the taught rule is live: replay the morning, the desk is switched.
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 26, 8, 50, tzinfo=UTC))
+    _fire_state_changed(hass, KITCHEN, "off", "on", datetime(2026, 11, 26, 8, 52, tzinfo=UTC))
+    await hass.async_block_till_done()
+    assert len(calls) == 1
+
+
+async def test_record_save_direct_maps_on_off_actions(hass: HomeAssistant, hass_ws_client) -> None:
+    calls = capture_calls(hass, "switch", "turn_on")
+    seed_behaviours(hass)  # shared config dir: start with no behaviours at all
+    await setup_entry(hass)
+    client = await hass_ws_client(hass)
+    assert (await _send(client, 3, {"type": "phil9000/record_clear"}))["success"] is True
+
+    await _record_morning_demo(hass, client, base=5)
+
+    # Without a proposal, plain save refuses and points at the options.
+    out = await _send(client, 20, {"type": "phil9000/record_save"})
+    assert out["success"] is False and out["error"]["code"] == "not_supported"
+
+    out = await _send(client, 21, {"type": "phil9000/record_save", "direct": True})
+    assert out["success"] is True, out
+    created = {b.id: b for b in reload_behaviours(hass)}[out["result"]["behaviour_id"]]
+    assert created.status is BehaviourStatus.CONFIRMED
+    assert [s.entity_id for s in created.steps] == [OFFICE, KITCHEN]
+    assert created.actions[0].service == "turn_on"
+
+    # No time windows or weekday constraints in direct mode: fire any evening.
+    _fire_state_changed(hass, OFFICE, "off", "on", datetime(2026, 11, 26, 18, 0, tzinfo=UTC))
+    _fire_state_changed(hass, KITCHEN, "off", "on", datetime(2026, 11, 26, 18, 1, tzinfo=UTC))
+    await hass.async_block_till_done()
+    assert len(calls) == 1

@@ -110,6 +110,9 @@ BEHAVIOURS_FILE = "behaviours.yaml"
 # Ring buffer of recent analysis runs shown in the panel (newest last).
 ANALYSIS_LOG_FILE = "analysis_log.yaml"
 ANALYSIS_LOG_LIMIT = 50
+# The recording in progress (triggers/actions/notes/proposal), so an HA
+# restart mid-recording does not lose the user's demonstration.
+RECORDING_FILE = "recording.yaml"
 # Occurrence-counter saves are debounced: a noisy candidate can bump
 # counters on every match, and behaviours.yaml need not rewrite that often.
 SAVE_DEBOUNCE_SECONDS = 30

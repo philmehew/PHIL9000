@@ -112,6 +112,24 @@ user-editable and versionable. Observation data itself stays in HA's recorder.
   survive restarts (`.phil9000/analysis_log.yaml`).
   (`phil9000/analysis_log`, `phil9000/subscribe_analysis_log`)
 
+- **Record — teach a rule by demonstration.** Press **● Record trigger** by the feed
+  title and do the thing (motion, a switch, a door — anything the feed sees); press
+  **● Record action** and then change what the automation should replay later (the
+  target device does *not* need to be observed — action capture takes every real state
+  change). Captured rows appear under **Recorded triggers** / **Recorded actions**
+  headings, marked with ●/⚡ in the feed itself; remove anything irrelevant with × and
+  add **notes** the model should know ("weekdays only", "dim it to 30% warm"). Then
+  **✨ Propose automation** asks the LLM to generalise the demonstration into a full
+  automation (steps, gaps, schedule, service calls enriched from your notes); refine it
+  through the chat box ("actually, only weekdays") until it's right, and **✔ Create
+  automation** lands it as a *confirmed* behaviour — detected and executed by the same
+  deterministic Python engine, editable like any other behaviour. **Save as-is (no
+  LLM)** skips the proposal entirely for simple on/off demonstrations. The recording
+  survives restarts (`phil9000/recording.yaml`).
+  (`phil9000/record_status`, `phil9000/record_mode`, `phil9000/record_remove`,
+  `phil9000/record_notes`, `phil9000/record_clear`, `phil9000/record_propose`,
+  `phil9000/record_refine`, `phil9000/record_save`, `phil9000/subscribe_recording`)
+
 - **Accepted behaviours are hard-fixed**: the LLM may only refine candidates. Once you
   confirm (or dismiss) a behaviour, analysis passes leave it alone; genuinely different
   variants come back as new candidates. Names you set in the panel are also kept
