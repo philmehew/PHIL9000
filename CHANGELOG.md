@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.1 — 2026-11-28
+
+### Helper domains tell each other apart
+
+- The panel checklist renders only the part before the parentheses of a
+  domain label (the hint is a hover tooltip), so `input_boolean`,
+  `input_button` and `input_select` all appeared as three identical
+  "Helpers" rows. They are now **Helper toggles**, **Helper buttons** and
+  **Helper dropdowns**; a new test asserts display labels stay unique
+  across the observable domains.
+
 ## v0.9.0 — 2026-11-28
 
 ### Buttons and remotes are real triggers (event-entity support)

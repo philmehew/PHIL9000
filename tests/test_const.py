@@ -28,3 +28,11 @@ def test_short_labels_have_no_brackets_left():
         assert "(" not in label and ")" not in label
         assert label == label.strip()
     assert len(OBSERVABLE_DOMAIN_LABELS) == len(OBSERVABLE_DOMAINS)
+
+
+def test_display_labels_are_unique():
+    """The panel shows only the part before the parentheses (the hint is a
+    tooltip), so three "Helpers (…)" labels would render as three identical
+    "Helpers" checkboxes. Display labels must tell the domains apart."""
+    labels = [domain_label_parts(domain)[0] for domain in OBSERVABLE_DOMAINS]
+    assert len(labels) == len(set(labels)), sorted(labels)
