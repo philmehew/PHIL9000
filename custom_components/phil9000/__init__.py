@@ -43,6 +43,7 @@ from .const import (
     SERVICE_RUN_ANALYSIS,
     STATIC_URL_PATH,
     UI_REGISTERED_FLAG,
+    VERSION,
 )
 from .detect import Detection, DetectionEngine
 from .models import (
@@ -308,7 +309,7 @@ async def _async_ensure_ui(hass: HomeAssistant) -> bool:
             frontend_url_path=PANEL_URL_PATH,
             sidebar_title="PHIL9000",
             sidebar_icon="mdi:eye-circle",
-            module_url=f"{STATIC_URL_PATH}/panel.js",
+            module_url=f"{STATIC_URL_PATH}/panel.js?v={VERSION}",
             require_admin=False,
         )
     except Exception:  # noqa: BLE001 — the integration works headless without UI

@@ -5,9 +5,16 @@ Pure module — must not import Home Assistant (guarded by tests/test_purity.py)
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 DOMAIN = "phil9000"
+
+# The integration's version, straight from the manifest: stamping it on the
+# panel JS URL (?v=…) means a browser can never keep serving a panel from a
+# previous release after an update.
+VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text())["version"]
 
 EVENT_BEHAVIOUR_DETECTED = f"{DOMAIN}_behaviour_detected"
 

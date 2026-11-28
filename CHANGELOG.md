@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.1 — 2026-11-28
+
+### Panel JS can no longer go stale in the browser
+
+- The panel script is now served as `panel.js?v=<version>`, so every
+  release gives the browser a different URL. Before this, a browser tab
+  opened before an update could keep running the previous release's
+  panel code indefinitely (the static path already sent no-cache headers,
+  but a live tab never re-fetches a script it has already loaded).
+
 ## v0.7.0 — 2026-11-28
 
 ### AI task agents: the recommended route to the LLM
