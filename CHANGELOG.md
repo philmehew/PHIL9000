@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.7.2 — 2026-11-28
+
+### Fix: ai_task runs crashed on Home Assistant's merged LLM serializer
+
+- The first ai_task attempt passed PHIL9000's reply schema through
+  HA's structured output. On HA 2026.11 this dies instantly with
+  *"AI task agent call failed: '_Unsupported' object is not subscriptable"*:
+  the merged LLM custom serializer in `helpers/llm.py` only checks
+  `is not None`, so it forwards probatio's `UNSUPPORTED` defer-sentinel
+  into `to_openapi`, which treats it as a dict.
+- The analysis now runs without the `structure` parameter: the reply
+  comes back as text and PHIL9000's own parser — which enforces the
+  identical contract — validates it. All the ai_task route's benefits
+  (dedicated subentry, no voice-assistant prompt, own max-tokens, no
+  tool injection) are unchanged. The schema stays in the code,
+  probatio-compatible, ready to be re-wired once Home Assistant fixes
+  the sentinel handling.
+
 ## v0.7.1 — 2026-11-28
 
 ### Panel JS can no longer go stale in the browser

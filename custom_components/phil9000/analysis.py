@@ -224,9 +224,6 @@ async def _async_call_ai_task_agent(hass: HomeAssistant, agent_id: str, prompt: 
     import json
 
     from homeassistant.components import ai_task  # function-local: purity guard
-    from probatio import from_json_schema
-
-    from .analyser import ANALYSIS_REPLY_SCHEMA
 
     try:
         async with asyncio.timeout(AGENT_TIMEOUT_SECONDS):
@@ -235,7 +232,14 @@ async def _async_call_ai_task_agent(hass: HomeAssistant, agent_id: str, prompt: 
                 task_name="PHIL9000 pattern analysis",
                 entity_id=agent_id,
                 instructions=prompt,
-                structure=from_json_schema(ANALYSIS_REPLY_SCHEMA),
+                # No "structure": HA 2026.11's merged LLM custom serializer
+                # (helpers/llm.py) forwards probatio's UNSUPPORTED sentinel
+                # into to_openapi for JSON-Schema-derived nodes, which dies
+                # with "'_Unsupported' object is not subscriptable" before
+                # any request is sent. PHIL9000's reply parser enforces the
+                # same contract (ANALYSIS_REPLY_SCHEMA documents it), so the
+                # schema is validation we can re-add once HA fixes the
+                # sentinel handling.
             )
     except TimeoutError:
         raise AnalysisUnavailableError(
@@ -246,12 +250,14 @@ async def _async_call_ai_task_agent(hass: HomeAssistant, agent_id: str, prompt: 
     except Exception as err:  # noqa: BLE001 — surface as a friendly service error
         raise AnalysisUnavailableError(f"AI task agent call failed: {err}") from err
     data = result.data
-    if not isinstance(data, dict):
-        raise AnalysisUnavailableError(
-            f"the AI task agent returned {type(data).__name__} instead of structured data — "
-            "check the agent's model and max-tokens settings"
-        )
-    return json.dumps(data)
+    if isinstance(data, str):
+        return data
+    if isinstance(data, dict):
+        return json.dumps(data)
+    raise AnalysisUnavailableError(
+        f"the AI task agent returned {type(data).__name__} instead of text or structured data — "
+        "check the agent's model and max-tokens settings"
+    )
 
 
 def _expand_specs(hass: HomeAssistant, specs: list[str], exclude: list[str]) -> list[str]:

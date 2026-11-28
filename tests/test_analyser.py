@@ -100,10 +100,12 @@ def test_summarise_drops_constant_state_spam_but_keeps_rare_markers():
 
 
 def test_reply_schema_matches_the_parser_contract():
-    # The schema drives HA's ai_task structured output, so it must describe
-    # exactly what parse_analysis_reply accepts: "updates" items carry an id,
+    # The schema documents the reply contract: "updates" items carry an id,
     # "new" items don't, steps need entity_id and to_state, and the whole
-    # reply needs both lists.
+    # reply needs both lists. The parser enforces this; the schema is kept
+    # probatio-compatible so HA's ai_task structured output can take it
+    # once Home Assistant's merged LLM serializer handles the UNSUPPORTED
+    # sentinel correctly.
     from custom_components.phil9000.analyser import ANALYSIS_REPLY_SCHEMA
 
     assert ANALYSIS_REPLY_SCHEMA["required"] == ["updates", "new"]

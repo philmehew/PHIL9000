@@ -36,10 +36,14 @@ SUMMARY_CHAR_BUDGET = 100_000
 def _reply_item_schema(*, with_id: bool) -> dict[str, Any]:
     """JSON Schema for one "updates" or "new" element of the LLM's reply.
 
-    Only keywords probatio's ``from_json_schema`` honours are used, so the
-    same document drives HA's ai_task structured output (which validates the
-    reply before PHIL9000 sees it) and documents the contract. Descriptions
-    are descriptive only — they help models that render the schema.
+    This documents the reply contract the prompt asks for and the parser
+    enforces. It is written with only keywords probatio's
+    ``from_json_schema`` honours, so it can be handed to HA's ai_task
+    structured output once Home Assistant's merged LLM custom serializer
+    stops forwarding probatio's UNSUPPORTED sentinel into ``to_openapi``
+    (HA 2026.11 dies with "'_Unsupported' object is not subscriptable").
+    Descriptions are descriptive only — they help models that render the
+    schema.
     """
     properties: dict[str, Any] = {}
     if with_id:
