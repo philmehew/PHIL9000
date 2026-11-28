@@ -78,3 +78,34 @@ services `phil9000.*` (e.g. `phil9000.confirm_pattern`).
    ```
 
 6. In Home Assistant: HACS → ⋮ → *Reload HACS*, then update PHIL9000.
+
+## Accessing the test Home Assistant box
+
+The live test environment is a Home Assistant Container install on the local
+network. Use it to inspect logs, learned-state files and the LLM agents during
+debugging.
+
+- **SSH:** `ssh philm@192.168.0.101` (the HA "SSH & Web Terminal" add-on).
+  **The password is deliberately not recorded here — ask the user for it.**
+  The user is typically at the keyboard; request it once per session and use
+  an `expect` wrapper (password auth needs `PreferredAuthentications=password
+  PubkeyAuthentication=no`).
+- **Root:** `sudo -n` works passwordless for `philm`. Many `/config` files
+  (e.g. `phil9000/behaviours.yaml`) are root-owned, so read them via `sudo -n cat`.
+- **Container logs:** the Supervisor CLI (`ha core logs`) returns 401/403 from
+  this add-on — use `sudo -n docker logs homeassistant` instead. The HA
+  container is named `homeassistant`; `sudo -n docker exec homeassistant …`
+  reaches the HA Python environment and core source
+  (`/usr/src/homeassistant/homeassistant/...`).
+- **Paths:** `/config` is shared between the host and the container. The
+  host's `/tmp` does not persist between add-on restarts; stage debug scripts
+  under `/config` if they must survive. `scp` needs the legacy `-O` flag
+  against this SSH server.
+- **PHIL9000 state on the box:** `/config/phil9000/behaviours.yaml` (learned
+  behaviours/candidates) and `/config/phil9000/analysis_log.yaml` (analysis
+  run log, also served to the panel via `phil9000/analysis_log`).
+- **Local LLM server** (what the HA agents point at): OpenAI-compatible
+  endpoint `http://192.168.0.117:8087/v1`, model `qwen3.8-flash-next`.
+  It is a reasoning model — thinking/reasoning must be **off**, or replies get
+  starved. Direct `curl` calls to it are the fastest way to test prompts
+  outside HA.
